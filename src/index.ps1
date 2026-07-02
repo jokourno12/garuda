@@ -18,16 +18,39 @@ param(
 
 showBanner
 
+# DEBUGGING
+Write-Information @"
+   Debugging information
+-----------------------------
+pMin: $pMin
+pMax: $pMax
+quickScan: $($quickScan.IsPresent)
+Targets: $targets
+Ports: $ports
+-----------------------------
+"@
+
 # Memanggil function yang ada di Engine.ps1
 if ($help) {
-    	helpEngine
+    helpEngine
 }
-
-if ($discover) {
-	discoverEngine
+elseif ($discover) {
+    discoverEngine
 }
-
-if ($quickScan) {
-	quickScanEngine
+elseif ($quickScan) {
+    quickScanEngine `
+        -targets $targets `
+        -quickScan:$true `
+        -pMin $pMin `
+        -pMax $pMax `
+        -ports $ports
 }
-
+else {
+    # FULL SCAN DEFAULT
+    quickScanEngine `
+        -targets $targets `
+        -quickScan:$false `
+        -pMin $pMin `
+        -pMax $pMax `
+        -ports $ports
+}

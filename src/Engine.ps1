@@ -18,6 +18,20 @@ function discoverEngine {
 }
 
 function quickScanEngine {
-	quickScanCommand
+	[CmdletBinding()]
+	param(
+        [string[]]$targets,
+        [switch]$quickScan,
+        [int]$pMin,
+        [int]$pMax,
+        [string[]]$ports
+    )
+
+    quickScanCommand `
+        -targets $targets `
+        -quickScan:$quickScan `
+        -pMin $pMin `
+        -pMax $pMax `
+        -ports $ports
 }
 

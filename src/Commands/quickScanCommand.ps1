@@ -1,6 +1,19 @@
 . $PSScriptRoot\..\Modules\scanner.ps1
 
 function quickScanCommand {
-    Write-Host "Hello World From Quick Scan Command"
-    scanner
+[CmdletBinding()]
+param(
+        [string[]]$targets,
+        [switch]$quickScan,
+        [int]$pMin,
+        [int]$pMax,
+        [string[]]$ports
+    )
+
+    scanner `
+        -targets $targets `
+        -quickScan:$quickScan `
+        -pMin $pMin `
+        -pMax $pMax `
+        -ports $ports
 }
