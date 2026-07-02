@@ -1,5 +1,6 @@
 #Commands
-. $PSScriptRoot\Commands\fullScan.ps1
+. $PSScriptRoot\Commands\quickScanCommand.ps1
+. $PSScriptRoot\Commands\discoverCommand.ps1
 
 #Support
 . $PSScriptRoot\Support\Banner.ps1
@@ -13,9 +14,10 @@ function helpEngine {
 }
 
 function discoverEngine {
-    Write-Host "Hello World From Discover"
+    	discoverCommand
 }
 
-function fullScan2 {
-    fullScan1
+function quickScanEngine {
+	quickScanCommand
 }
+

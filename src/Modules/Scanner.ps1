@@ -1,3 +1,3 @@
-function moduleOne {
-    Write-Host "Hello World From Module One"
+function scanner {
+    Write-Host "Hello World From Module Scanner"
 }
