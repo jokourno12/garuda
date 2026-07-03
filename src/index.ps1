@@ -7,6 +7,7 @@ param(
 	[switch]$help,
 	[switch]$discover,
 	[switch]$quickScan,
+	[switch]$fullScan,
 	# Port Configuration
 	[int]$pMin = 1,
 	[int]$pMax = 65535,
@@ -32,12 +33,16 @@ Ports: $ports
 
 # Memanggil function yang ada di Engine.ps1
 if ($help) {
-    helpEngine
+    	helpEngine
+	return
 }
-elseif ($discover) {
-    discoverEngine
+
+if ($discover) {
+	discoverEngine
+	return
 }
-elseif ($quickScan) {
+
+if ($quickScan) {
     quickScanEngine `
         -targets $targets `
         -quickScan:$true `
@@ -45,12 +50,14 @@ elseif ($quickScan) {
         -pMax $pMax `
         -ports $ports
 }
-else {
+
+if ($fullScan) {
     # FULL SCAN DEFAULT
-    quickScanEngine `
+    fullScanEngine `
         -targets $targets `
         -quickScan:$false `
         -pMin $pMin `
         -pMax $pMax `
         -ports $ports
 }
+

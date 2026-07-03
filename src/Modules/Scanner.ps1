@@ -40,6 +40,12 @@ if (Test-Path $PortListPath) {
 else {
 
     Write-Host "ports.txt belum ada"
+    
+    $modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
+
+    if (-not (Get-Module -Name PortDatabase)) {
+        Import-Module $modulePath -Force -ErrorAction Stop
+    }
 
     Get-WebPorts
 
