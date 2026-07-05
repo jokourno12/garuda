@@ -1,4 +1,4 @@
-. $PSScriptRoot\..\Modules\scanner.ps1
+. $PSScriptRoot\..\Modules\Scanner.ps1
 
 function customScanCommand {
 [CmdletBinding()]
