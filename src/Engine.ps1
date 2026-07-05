@@ -16,7 +16,7 @@ function helpEngine {
 }
 
 function discoverEngine {
-    	discoverCommand
+    discoverCommand
 }
 
 function quickScanEngine {
