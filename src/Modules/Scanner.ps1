@@ -14,52 +14,67 @@ function scanner {
     }
 
     # DATABASE SERVICE PORT
-    $PortListPath = Join-Path $PSScriptRoot '..\Support\ports.txt'
+    $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'ports.txt')
 
-    function populatePortsHash {
-        $portsHashTable = @{}
-        foreach ($line in Get-Content -Path $PortListPath) {
-            if (-not([String]::IsNullOrEmpty($line))) {
+function populatePortsHash {
+    $portsHashTable = @{}
+    
+    # Menggunakan Get-Content dengan error handling sederhana
+    $lines = Get-Content -Path $PortListPath -ErrorAction SilentlyContinue
+    
+    foreach ($line in $lines) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            $HashTableData = $line.Split("|")
+            
+            # Memastikan array memiliki setidaknya 4 elemen sebelum diproses
+            if ($HashTableData.Count -ge 4) {
                 try {
-                    $HashTableData = $line.Split("|")
-
-
-                    $portsHashTable.add([int]$HashTableData[0], [String]::Format("{0}|{1}", $HashTableData[2], $HashTableData[3]))
-
+                    # Mengonversi port ke [int]
+                    $port = [int]$HashTableData[0]
+                    $value = "{0}|{1}" -f $HashTableData[2], $HashTableData[3]
+                    
+                    # Menggunakan assignment langsung untuk menghindari error .add()
+                    $portsHashTable[$port] = $value
                 }
-                catch [System.ArgumentException] { }
+                catch {
+                    Write-Warning "Gagal memproses baris: $line"
+                }
             }
         }
-        return $portsHashTable
     }
+    return $portsHashTable
+}
 
 
-    if (Test-Path $PortListPath) {
-        $portsHashTable = populatePortsHash
+    if ((Test-Path -Path $PortListPath -PathType Leaf -ErrorAction SilentlyContinue) -and ((Get-Item $PortListPath -ErrorAction SilentlyContinue).CreationTime -gt (Get-Date).AddDays(-28))) {
+    Write-Verbose -Message "Read ports.txt and fill hash table..."
+    $portsHashTable = populatePortsHash
     }
     else {
+# Memberikan feedback yang informatif berdasarkan kondisi
+    if (-not $fileInfo) {
+        Write-Host "File ports.txt tidak ditemukan. Memulai proses pembuatan..."
+    } else {
+        Write-Host "File ports.txt sudah usang (>28 hari). Memperbarui data..."
+    }
 
-        Write-Host "ports.txt belum ada"
+    # Pastikan modul dimuat
+    $modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
+    if (-not (Get-Module -Name PortDatabase)) {
+        Import-Module $modulePath -Force -ErrorAction Stop
+    }
 
-        $modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
+    # Jalankan proses update
+    Get-WebPorts
+    Get-Version
 
-        if (-not (Get-Module -Name PortDatabase)) {
-            Import-Module $modulePath -Force -ErrorAction Stop
-        }
+    # Cek sekali saja setelah proses update
+    if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
+        throw "Kritis: Get-WebPorts gagal membuat atau memperbarui $PortListPath"
+    }
 
-        Get-WebPorts
-
-        Write-Host "Sesudah Get-WebPorts"
-
-        Write-Host "File ada? $(Test-Path $PortListPath)"
-
-        if (-not (Test-Path $PortListPath)) {
-            throw "Get-WebPorts gagal membuat ports.txt"
-        }
-
-        Get-Version
-
-        $portsHashTable = populatePortsHash
+    Write-Host "[+] File ports.txt berhasil dibuat atau diperbarui." -ForegroundColor Green
+    $portsHashTable = populatePortsHash
     }
 
     # INITIALIZATION RESULT SCAN
