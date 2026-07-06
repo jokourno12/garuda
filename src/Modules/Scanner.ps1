@@ -14,7 +14,7 @@ function scanner {
     }
 
     # DATABASE SERVICE PORT
-    $PortListPath = Join-Path $PSScriptRoot '..\Support\ports.txt'
+    $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'ports.txt')
 
     function populatePortsHash {
         $portsHashTable = @{}
@@ -34,12 +34,17 @@ function scanner {
     }
 
 
-    if (Test-Path $PortListPath) {
-        $portsHashTable = populatePortsHash
+    if ((Test-Path -Path $PortListPath -PathType Leaf -ErrorAction SilentlyContinue) -and ((Get-Item $PortListPath -ErrorAction SilentlyContinue).CreationTime -gt (Get-Date).AddDays(-28))) {
+    Write-Verbose -Message "Read ports.txt and fill hash table..."
+    $portsHashTable = populatePortsHash
     }
     else {
 
-        Write-Host "ports.txt belum ada"
+        if ($null -eq $fileInfo) {
+        Write-Host "File ports.txt tidak ditemukan. Memulai proses unduhan..."
+    	} else {
+        Write-Host "File ports.txt sudah usang (>28 hari). Memperbarui data..."
+    	}
 
         $modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
 
@@ -49,9 +54,9 @@ function scanner {
 
         Get-WebPorts
 
-        Write-Host "Sesudah Get-WebPorts"
-
-        Write-Host "File ada? $(Test-Path $PortListPath)"
+        if (-not (Test-Path $PortListPath)) {
+        throw "Kritis: Get-WebPorts gagal membuat atau memperbarui $PortListPath"
+    	}
 
         if (-not (Test-Path $PortListPath)) {
             throw "Get-WebPorts gagal membuat ports.txt"
