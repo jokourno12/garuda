@@ -1,4 +1,4 @@
-. $PSScriptRoot\..\Modules\Scanner.ps1
+. "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', 'Modules', 'Scanner.ps1')))"
 
 function customScanCommand {
 [CmdletBinding()]
