@@ -1,11 +1,11 @@
 #Commands
-. $PSScriptRoot\Commands\DiscoverCommand.ps1
-. $PSScriptRoot\Commands\QuickScanCommand.ps1
-. $PSScriptRoot\Commands\FullScanCommand.ps1
-. $PSScriptRoot\Commands\CustomScanCommand.ps1
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'DiscoverCommand.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'QuickScanCommand.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'FullScanCommand.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'CustomScanCommand.ps1'))"
 
 #Support
-. $PSScriptRoot\Support\Banner.ps1
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
 
 function showBanner {
     supportBanner

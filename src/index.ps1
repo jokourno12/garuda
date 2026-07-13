@@ -15,7 +15,7 @@ param(
 )
 
 # Memuat isi Engine.ps1 ke sesi saat ini
-. "$PSScriptRoot\Engine.ps1"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Engine.ps1'))"
 
 showBanner
 
