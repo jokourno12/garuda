@@ -1,6 +1,10 @@
 function Get-WebPorts {
 
-    [xml]$LatestPorts = (Invoke-WebRequest -Uri "https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Content
+    $client = [System.Net.Http.HttpClient]::new()
+$stream = $client.GetStreamAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
+
+    [xml]$LatestPorts = [System.Xml.XmlDocument]::new()
+    $LatestPorts.Load($stream)
 
     $output = ""
     $total = $LatestPorts.ChildNodes.record.Count
