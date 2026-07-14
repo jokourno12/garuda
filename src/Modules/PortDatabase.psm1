@@ -1,7 +1,7 @@
 function Get-WebPorts {
 
     $client = [System.Net.Http.HttpClient]::new()
-$stream = $client.GetStreamAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
+    $stream = $client.GetStreamAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
 
     [xml]$LatestPorts = [System.Xml.XmlDocument]::new()
     $LatestPorts.Load($stream)
