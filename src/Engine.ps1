@@ -16,7 +16,13 @@ function helpEngine {
 }
 
 function discoverEngine {
-    discoverCommand
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$targets
+    )
+
+    discoverCommand -targets $targets
 }
 
 function quickScanEngine {

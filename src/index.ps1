@@ -38,7 +38,7 @@ if ($help) {
 }
 
 if ($discover) {
-	discoverEngine
+	discoverEngine -targets $targets
 	return
 }
 
