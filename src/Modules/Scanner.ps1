@@ -77,180 +77,84 @@ function populatePortsHash {
     $portsHashTable = populatePortsHash
     }
 
-    # INITIALIZATION RESULT SCAN
+# INITIALIZATION RESULT SCAN
     $result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new() #required for multithreading
 
-    # QUICK SCAN ENGINE
-    if ($quickScan) {
-	
-        $ConfigPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'QuickScanPorts.psd1')
+    foreach ($target in $targets) {
         
-        $ConfigData = Import-PowerShellDataFile -Path $ConfigPath
-        $quickPortsData = $ConfigData.QuickScanPorts
-
-        foreach ($target in $targets) {
-            $ports = $quickPortsData
-
-            $ports | ForEach-Object -Parallel {
-                $port = $_
-                $Target = $using:target
-                $portsHashTable = $using:portsHashTable
-                $portInt = [Int] $port
-                $localResult = $using:result
-
-                Write-Progress -Activity "Scanning ${Target}:$port"
-
-                # TCP CONNECTION
-                $obj = new-object System.Net.Sockets.TcpClient
-                $connect = $obj.BeginConnect($Target, $port, $null, $null)
-                $Wait = $connect.AsyncWaitHandle.WaitOne(100, $false)
-
-                if (-not $Wait) {
-                    Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose
-                }
-
-                else {
-                    $value = "Open"
-                    Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
-
-                    if ($portsHashTable.ContainsKey($portInt)) {
-
-                        $Service = $portsHashTable[$portInt].Split('|')
-
-                    }
-                    else {
-
-                        $Service = @("Unknown", "Unknown")
-                    }
-
-                    # Result Object Builder
-                    $r = New-Object -type psobject
-                    $r | Add-Member -MemberType NoteProperty -name Host -value $Target
-                    $r | Add-Member -MemberType NoteProperty -name Port -value $port
-                    $r | Add-Member -MemberType NoteProperty -name State -value $value
-                    $r | Add-Member -MemberType NoteProperty -name Service -value $Service[0]
-                    $r | Add-Member -MemberType NoteProperty -name "IANA Standard Description" -value $Service[1]
-
-                    $key = $Target + ":" + $port
-
-                    $localResult[$key] = $r
-
-                }
-
-            } -ThrottleLimit 15
+        # PERSIAPAN ARRAY PORT 
+        $portsToScan = @()
+        
+        if ($quickScan) {
+            $ConfigPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'QuickScanPorts.psd1')
+            $ConfigData = Import-PowerShellDataFile -Path $ConfigPath
+            $portsToScan = [int[]]$ConfigData.QuickScanPorts
         }
-    }
-
-    # CUSTOM PORT SCAN ENGINE
-    elseif ($ports -and $ports.Count -gt 0) {
-        foreach ($target in $targets) {
-
-            $ports | ForEach-Object -Parallel {
-                $port = $_
-                $Target = $using:target
-                $portsHashTable = $using:portsHashTable
-                $portInt = [Int] $port
-                $localResult = $using:result
-
-                Write-Progress -Activity "Scanning port ${Target}:$port"
-
-                # TCP CONNECTION
-                $obj = new-object System.Net.Sockets.TcpClient
-                $connect = $obj.BeginConnect($Target, $port, $null, $null)
-                $Wait = $connect.AsyncWaitHandle.WaitOne(100, $false)
-
-                if (-not $Wait) {
-                    Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose
-                }
-
-                else {
-                    $value = "Open"
-                    Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
-
-                    if ($portsHashTable.ContainsKey($portInt)) {
-
-                        $Service = $portsHashTable[$portInt].Split('|')
-
-                    }
-                    else {
-                        $Service = @("Unknown", "Unknown")
-                    }
-
-                    # Result Object Builder
-                    $r = New-Object -type psobject
-                    $r | Add-Member -MemberType NoteProperty -name Host -value $Target
-                    $r | Add-Member -MemberType NoteProperty -name Port -value $port
-                    $r | Add-Member -MemberType NoteProperty -name State -value $value
-                    $r | Add-Member -MemberType NoteProperty -name Service -value $Service[0]
-                    $r | Add-Member -MemberType NoteProperty -name "IANA Standard Description" -value $Service[1]
-
-                    $key = $Target + ":" + $port
-
-                    $localResult[$key] = $r
-
-                }
-
-            } -ThrottleLimit 15
+        elseif ($ports -and $ports.Count -gt 0) {
+            $portsToScan = [int[]]$ports
         }
-    }
+        else {
+            $portsToScan = [int[]]($pMin..$pMax)
+        }
 
-    # FULL PORT SCAN ENGINE
-    else {
-        foreach ($target in $targets) {
+        $totalPorts = $portsToScan.Count
 
-
-            $pMin..$pMax | ForEach-Object -Parallel {
-                $port = $_
+        # Pastikan ada port yang akan di-scan untuk menghindari error perhitungan
+        if ($totalPorts -gt 0) {
+            
+            # SINGLE SCAN ENGINE (Mengulang berdasarkan Index untuk akurasi persentase)
+            0..($totalPorts - 1) | ForEach-Object -Parallel {
+                $index = $_
+                $portsToScan = $using:portsToScan
+                $port = $portsToScan[$index]
+                
                 $Target = $using:target
-                $pMax = $using:pMax
-                $pMin = $using:pMin
                 $portsHashTable = $using:portsHashTable
-                $localResult = $using:result
-
-
                 $portInt = [Int] $port
-                $range = $pMax - $pMin
-                $curr = $_ - $pMax + $range
-                $completed = ($curr / $range) * 100
+                $localResult = $using:result
+                $totalPorts = $using:totalPorts
+
+                # TAMPILAN VISUAL INTERAKTIF DENGAN PERSENTASE
+                $completed = (($index + 1) / $totalPorts) * 100
                 Write-Progress -Activity "Scanning ${Target}:$port" -Status "$([math]::Round($completed, 2))% complete" -PercentComplete $completed
 
                 # TCP CONNECTION
                 $obj = new-object System.Net.Sockets.TcpClient
-                $connect = $obj.BeginConnect($Target, $port, $null, $null)
-                $Wait = $connect.AsyncWaitHandle.WaitOne(100, $false)
+                
+                try {
+                    $connect = $obj.BeginConnect($Target, $port, $null, $null)
+                    $Wait = $connect.AsyncWaitHandle.WaitOne(100, $false)
 
-                if (-not $Wait) {
-                    Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose
-                }
-
-                else {
-
-                    $value = "Open"
-                    Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
-
-                    if ($portsHashTable.ContainsKey($portInt)) {
-                        $Service = $portsHashTable[$portInt].Split('|')
+                    if (-not $Wait) {
+                        Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose
                     }
-
                     else {
+                        $value = "Open"
+                        Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
 
-                        $Service = @("Unknown", "Unknown")
+                        if ($portsHashTable.ContainsKey($portInt)) {
+                            $Service = $portsHashTable[$portInt].Split('|')
+                        }
+                        else {
+                            $Service = @("Unknown", "Unknown")
+                        }
+
+                        # Result Object Builder (Logic Asli)
+                        $r = New-Object -type psobject
+                        $r | Add-Member -MemberType NoteProperty -name Host -value $Target
+                        $r | Add-Member -MemberType NoteProperty -name Port -value $port
+                        $r | Add-Member -MemberType NoteProperty -name State -value $value
+                        $r | Add-Member -MemberType NoteProperty -name Service -value $Service[0]
+                        $r | Add-Member -MemberType NoteProperty -name "IANA Standard Description" -value $Service[1]
+
+                        $key = $Target + ":" + $port
+                        $localResult[$key] = $r
                     }
-
-                    # Result Object Builder
-                    $r = New-Object -type psobject
-                    $r | Add-Member -MemberType NoteProperty -name Host -value $Target
-                    $r | Add-Member -MemberType NoteProperty -name Port -value $port
-                    $r | Add-Member -MemberType NoteProperty -name State -value $value
-                    $r | Add-Member -MemberType NoteProperty -name Service -value $Service[0]
-                    $r | Add-Member -MemberType NoteProperty -name "IANA Standard Description" -value $Service[1]
-
-                    $key = $Target + ":" + $port
-
-                    $localResult[$key] = $r
-
                 }
-
+                finally {
+                    $obj.Close()
+                }
+                
             } -ThrottleLimit 15
         }
     }
