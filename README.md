@@ -3,7 +3,7 @@
 
 ![demo](src/Support/garuda-banner.gif)
 
-Garuda is a high-performance, multithreaded network discovery platform engineered for cross-platform compatibility. By leveraging direct .NET APIs to bypass PowerShell runtime overhead, it delivers rapid, memory-efficient TCP port scanning on Windows, Linux, and macOS without requiring elevated privileges.
+Garuda is a high-performance, multithreaded network discovery platform engineered for cross-platform compatibility. By bypassing high-level abstractions in favor of direct socket-level primitives, Garuda minimizes runtime overhead and optimizes transport-layer interaction, delivering rapid, memory-efficient scanning across Windows, Linux, and macOS.
 
 ## Lean Development Principles
 We minimize waste to keep Garuda fast, lightweight, and reliable:

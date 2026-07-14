@@ -119,7 +119,18 @@ function populatePortsHash {
                 Write-Progress -Activity "Scanning ${Target}:$port" -Status "$([math]::Round($completed, 2))% complete" -PercentComplete $completed
 
                 # TCP CONNECTION
-                $obj = new-object System.Net.Sockets.TcpClient
+                $obj = [System.Net.Sockets.Socket]::new(
+    				[System.Net.Sockets.AddressFamily]::InterNetwork, 
+    				[System.Net.Sockets.SocketType]::Stream, 
+    				[System.Net.Sockets.ProtocolType]::Tcp
+				)
+
+				$obj.NoDelay = $true
+				$obj.SendTimeout = 100
+				$obj.ReceiveTimeout = 100
+
+				$ip = [System.Net.IPAddress]::Parse($Target)
+				$endpoint = [System.Net.IPEndPoint]::new($ip, $port)
                 
                 try {
                     $connect = $obj.BeginConnect($Target, $port, $null, $null)
