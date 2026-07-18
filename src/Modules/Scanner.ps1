@@ -1,11 +1,11 @@
 function scanner {
     param(
-            [string[]]$targets,
-            [switch]$quickScan,
-            [int]$pMin,
-            [int]$pMax,
-            [string[]]$ports
-        )
+        [string[]]$targets,
+        [switch]$quickScan,
+        [int]$pMin,
+        [int]$pMax,
+        [string[]]$ports
+    )
 
     # ARGUMENT VALIDATION
     if ($targets[0] -eq "") {
@@ -16,34 +16,31 @@ function scanner {
     # DATABASE SERVICE PORT
     $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'ports.txt')
 
-function populatePortsHash {
-    $portsHashTable = @{}
+    function populatePortsHash {
+        $portsHashTable = @{}
     
-    # Menggunakan Get-Content dengan error handling sederhana
-    $lines = Get-Content -Path $PortListPath -ErrorAction SilentlyContinue
+        # Menggunakan Get-Content dengan error handling sederhana
+        $lines = Get-Content -Path $PortListPath -ErrorAction SilentlyContinue
     
-    foreach ($line in $lines) {
-        if (-not [string]::IsNullOrWhiteSpace($line)) {
-            $HashTableData = $line.Split("|")
+        foreach ($line in $lines) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $HashTableData = $line.Split("|")
             
-            # Memastikan array memiliki setidaknya 4 elemen sebelum diproses
-            if ($HashTableData.Count -ge 4) {
-                try {
-                    # Mengonversi port ke [int]
-                    $port = [int]$HashTableData[0]
-                    $value = "{0}|{1}" -f $HashTableData[2], $HashTableData[3]
+                if ($HashTableData.Count -ge 4) {
+                    try {
+                        $port = [int]$HashTableData[0]
+                        $value = "{0}|{1}" -f $HashTableData[2], $HashTableData[3]
                     
-                    # Menggunakan assignment langsung untuk menghindari error .add()
-                    $portsHashTable[$port] = $value
-                }
-                catch {
-                    Write-Warning "Gagal memproses baris: $line"
+                        $portsHashTable[$port] = $value
+                    }
+                    catch {
+                        Write-Warning "Gagal memproses baris: $line"
+                    }
                 }
             }
         }
+        return $portsHashTable
     }
-    return $portsHashTable
-}
 
 
     if ((Test-Path -Path $PortListPath -PathType Leaf -ErrorAction SilentlyContinue) -and ((Get-Item $PortListPath -ErrorAction SilentlyContinue).CreationTime -gt (Get-Date).AddDays(-28))) {
@@ -51,48 +48,46 @@ function populatePortsHash {
     $portsHashTable = populatePortsHash
     }
     else {
-# Memberikan feedback yang informatif berdasarkan kondisi
-    if (-not $fileInfo) {
-        Write-Host "File ports.txt tidak ditemukan. Memulai proses pembuatan..."
-    } else {
+    	if (-not $fileInfo) {
+        	Write-Host "File ports.txt tidak ditemukan. Memulai proses pembuatan..."
+    	} else {
         Write-Host "File ports.txt sudah usang (>28 hari). Memperbarui data..."
-    }
+    	}
 
-    # Pastikan modul dimuat
-    $modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
-    if (-not (Get-Module -Name PortDatabase)) {
-        Import-Module $modulePath -Force -ErrorAction Stop
-    }
+    	# Pastikan modul dimuat
+    	$modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
+    	if (-not (Get-Module -Name PortDatabase)) {
+        	Import-Module $modulePath -Force -ErrorAction Stop
+    	}
 
-    # Jalankan proses update
-    getWebPorts
-    getVersion
+    	# Jalankan proses update
+    	getWebPorts
+    	getVersion
 
-    # Cek sekali saja setelah proses update
-    if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
+    	# Cek sekali saja setelah proses update
+    	if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
         throw "Kritis: getWebPorts gagal membuat atau memperbarui $PortListPath"
+    	}
+
+    	Write-Host "[+] File ports.txt berhasil dibuat atau diperbarui." -ForegroundColor Green
+    	$portsHashTable = populatePortsHash
     }
 
-    Write-Host "[+] File ports.txt berhasil dibuat atau diperbarui." -ForegroundColor Green
-    $portsHashTable = populatePortsHash
-    }
-
-# INITIALIZATION RESULT SCAN
+	# INITIALIZATION RESULT SCAN
     $result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new() #required for multithreading
 
     foreach ($target in $targets) {
-        
-        # [PERBAIKAN DNS RESOLUTION] - Resolve DNS di luar loop parallel untuk menghindari overhead
         try {
     	    # Ambil IP pertama dari hasil resolusi DNS (Bisa IPv4 atau IPv6)
     	    $resolvedIP = [System.Net.Dns]::GetHostAddresses($target)[0]
     
     	    $TargetIP = $resolvedIP.IPAddressToString
     	    $TargetFamily = $resolvedIP.AddressFamily # Ini akan otomatis berisi InterNetwork atau InterNetworkV6
-	} catch {
+		}
+		catch {
     	    Write-Warning "Gagal menemukan IP untuk host: $target. Melewati target ini..."
-    continue
-	}
+    		continue
+	    }
 
         # PERSIAPAN ARRAY PORT 
         $portsToScan = @()
@@ -122,7 +117,7 @@ function populatePortsHash {
                 
                 $Target = $using:target           # Nama host (untuk output)
                 $TargetIP = $using:TargetIP       # IP Address murni (untuk koneksi)
-		$TargetFamily = $using:TargetFamily
+				$TargetFamily = $using:TargetFamily
                 $portsHashTable = $using:portsHashTable
                 $portInt = [Int] $port
                 $localResult = $using:result
@@ -157,40 +152,39 @@ function populatePortsHash {
                     }
                     else {
                         if ($obj.Connected) {
-                                $value = "Open"
-                                Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
+                            $value = "Open"
+                            Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
 
-                                if ($portsHashTable.ContainsKey($portInt)) {
-                                    $Service = $portsHashTable[$portInt].Split('|')
-                                }
-                                else {
-                                    $Service = @("Unknown", "Unknown")
-                                }
-
-                                $r = [PSCustomObject]@{
-                                    Host = $Target
-                                    Port = $port
-                                    State = $value
-                                    Service = $Service[0]
-                                    "IANA Standard Description" = $Service[1]
-                                }
-
-                                $key = $Target + ":" + $port
-                                $localResult[$key] = $r
+                            if ($portsHashTable.ContainsKey($portInt)) {
+                                $Service = $portsHashTable[$portInt].Split('|')
                             }
                             else {
-                                # Server membalas dengan cepat, tetapi berupa penolakan (TCP RST)
-                                Write-Verbose -Message "$Target 'port' $port 'Closed - Refused'" -Verbose
+                                $Service = @("Unknown", "Unknown")
                             }
+
+                            $r = [PSCustomObject]@{
+                                Host = $Target
+                                Port = $port
+                                State = $value
+                                Service = $Service[0]
+                                "IANA Standard Description" = $Service[1]
+                            }
+
+                            $key = $Target + ":" + $port
+                            $localResult[$key] = $r
+                        }
+                        else {
+                            # Server membalas dengan cepat, tetapi berupa penolakan (TCP RST)
+                            Write-Verbose -Message "$Target 'port' $port 'Closed - Refused'" -Verbose
+                        }
                     }
                 }
-		catch {
-    		    Write-Verbose -Message "$Target 'port' $port 'Error: $($_.Exception.Message)'" -Verbose
-		}
+				catch {
+    		        Write-Verbose -Message "$Target 'port' $port 'Error: $($_.Exception.Message)'" -Verbose
+		        }
                 finally {
                     $obj.Close()
                 }
-                
             } -ThrottleLimit 15
         }
     }
