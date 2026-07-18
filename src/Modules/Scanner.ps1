@@ -82,6 +82,18 @@ function populatePortsHash {
 
     foreach ($target in $targets) {
         
+        # [PERBAIKAN DNS RESOLUTION] - Resolve DNS di luar loop parallel untuk menghindari overhead
+        try {
+    	    # Ambil IP pertama dari hasil resolusi DNS (Bisa IPv4 atau IPv6)
+    	    $resolvedIP = [System.Net.Dns]::GetHostAddresses($target)[0]
+    
+    	    $TargetIP = $resolvedIP.IPAddressToString
+    	    $TargetFamily = $resolvedIP.AddressFamily # Ini akan otomatis berisi InterNetwork atau InterNetworkV6
+	} catch {
+    	    Write-Warning "Gagal menemukan IP untuk host: $target. Melewati target ini..."
+    continue
+	}
+
         # PERSIAPAN ARRAY PORT 
         $portsToScan = @()
         
@@ -108,7 +120,9 @@ function populatePortsHash {
                 $portsToScan = $using:portsToScan
                 $port = $portsToScan[$index]
                 
-                $Target = $using:target
+                $Target = $using:target           # Nama host (untuk output)
+                $TargetIP = $using:TargetIP       # IP Address murni (untuk koneksi)
+		$TargetFamily = $using:TargetFamily
                 $portsHashTable = $using:portsHashTable
                 $portInt = [Int] $port
                 $localResult = $using:result
@@ -120,48 +134,59 @@ function populatePortsHash {
 
                 # TCP CONNECTION
                 $obj = [System.Net.Sockets.Socket]::new(
-    				[System.Net.Sockets.AddressFamily]::InterNetwork, 
-    				[System.Net.Sockets.SocketType]::Stream, 
-    				[System.Net.Sockets.ProtocolType]::Tcp
-				)
+                    $TargetFamily, 
+                    [System.Net.Sockets.SocketType]::Stream, 
+                    [System.Net.Sockets.ProtocolType]::Tcp
+                )
 
-				$obj.NoDelay = $true
-				$obj.SendTimeout = 100
-				$obj.ReceiveTimeout = 100
+                $obj.NoDelay = $true
+                $obj.SendTimeout = 100
+                $obj.ReceiveTimeout = 100
 
-				$ip = [System.Net.IPAddress]::Parse($Target)
-				$endpoint = [System.Net.IPEndPoint]::new($ip, $port)
+                # [PERBAIKAN KONEKSI LOW-LEVEL]
+                $ip = [System.Net.IPAddress]::Parse($TargetIP)
+                $endpoint = [System.Net.IPEndPoint]::new($ip, $port)
                 
                 try {
-                    $connect = $obj.BeginConnect($Target, $port, $null, $null)
+                    # Koneksi memanggil $endpoint langsung, bukan $Target, menghindari DNS lookup berulang
+                    $connect = $obj.BeginConnect($endpoint, $null, $null)
                     $Wait = $connect.AsyncWaitHandle.WaitOne(100, $false)
 
                     if (-not $Wait) {
                         Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose
                     }
                     else {
-                        $value = "Open"
-                        Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
+                        if ($obj.Connected) {
+                                $value = "Open"
+                                Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
 
-                        if ($portsHashTable.ContainsKey($portInt)) {
-                            $Service = $portsHashTable[$portInt].Split('|')
-                        }
-                        else {
-                            $Service = @("Unknown", "Unknown")
-                        }
+                                if ($portsHashTable.ContainsKey($portInt)) {
+                                    $Service = $portsHashTable[$portInt].Split('|')
+                                }
+                                else {
+                                    $Service = @("Unknown", "Unknown")
+                                }
 
-                        # Result Object Builder (Logic Asli)
-                        $r = New-Object -type psobject
-                        $r | Add-Member -MemberType NoteProperty -name Host -value $Target
-                        $r | Add-Member -MemberType NoteProperty -name Port -value $port
-                        $r | Add-Member -MemberType NoteProperty -name State -value $value
-                        $r | Add-Member -MemberType NoteProperty -name Service -value $Service[0]
-                        $r | Add-Member -MemberType NoteProperty -name "IANA Standard Description" -value $Service[1]
+                                $r = [PSCustomObject]@{
+                                    Host = $Target
+                                    Port = $port
+                                    State = $value
+                                    Service = $Service[0]
+                                    "IANA Standard Description" = $Service[1]
+                                }
 
-                        $key = $Target + ":" + $port
-                        $localResult[$key] = $r
+                                $key = $Target + ":" + $port
+                                $localResult[$key] = $r
+                            }
+                            else {
+                                # Server membalas dengan cepat, tetapi berupa penolakan (TCP RST)
+                                Write-Verbose -Message "$Target 'port' $port 'Closed - Refused'" -Verbose
+                            }
                     }
                 }
+		catch {
+    		    Write-Verbose -Message "$Target 'port' $port 'Error: $($_.Exception.Message)'" -Verbose
+		}
                 finally {
                     $obj.Close()
                 }
