@@ -65,12 +65,12 @@ function populatePortsHash {
     }
 
     # Jalankan proses update
-    Get-WebPorts
-    Get-Version
+    getWebPorts
+    getVersion
 
     # Cek sekali saja setelah proses update
     if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
-        throw "Kritis: Get-WebPorts gagal membuat atau memperbarui $PortListPath"
+        throw "Kritis: getWebPorts gagal membuat atau memperbarui $PortListPath"
     }
 
     Write-Host "[+] File ports.txt berhasil dibuat atau diperbarui." -ForegroundColor Green

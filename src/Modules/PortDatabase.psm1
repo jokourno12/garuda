@@ -1,4 +1,4 @@
-function Get-WebPorts {
+function getWebPorts {
 
     $client = [System.Net.Http.HttpClient]::new()
     
@@ -58,22 +58,31 @@ function Get-WebPorts {
     }
 }
 
-function get-Version {
+function getVersion {
     $localModulePath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'package.psd1')
     $remoteModuleUrl = "https://raw.githubusercontent.com/jokourno12/garuda/main/package.psd1"
 
-    $localModule = Import-PowerShellDataFile -Path $localModulePath
-    $localVersion = [version]$localModule.ModuleVersion
-
     $client = [System.Net.Http.HttpClient]::new()
-    $stringContent = $client.GetStringAsync($remoteModuleUrl).Result
-    $remoteModuleContent = [PSCustomObject]@{ Content = $stringContent }
-    $ast = [System.Management.Automation.Language.Parser]::ParseInput($remoteModuleContent.Content, [ref]$null, [ref]$null)
-    $remoteModule = $ast.EndBlock.Statements[0].PipelineElements[0].Expression.Value
+    
+    try {
+        $localModule = Import-PowerShellDataFile -Path $localModulePath
+        $localVersion = [version]$localModule.ModuleVersion
 
-    $remoteVersion = [version]$remoteModule.ModuleVersion
+        $stringContent = $client.GetStringAsync($remoteModuleUrl).Result
+        $remoteModuleContent = [PSCustomObject]@{ Content = $stringContent }
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($remoteModuleContent.Content, [ref]$null, [ref]$null)
+        $remoteModule = $ast.EndBlock.Statements[0].PipelineElements[0].Expression.Value
 
-    if ($localVersion.Major -lt $remoteVersion.Major) {
-        Write-Host "A new version ($remoteVersion) is available. Please update your module." -ForegroundColor Yellow
+        $remoteVersion = [version]$remoteModule.ModuleVersion
+
+        if ($localVersion.Major -lt $remoteVersion.Major) {
+            Write-Host "A new version ($remoteVersion) is available. Please update your module." -ForegroundColor Yellow
+        }          
+    }
+    catch {
+        Write-Warning "Gagal mengecek pembaruan versi. Detail: $($_.Exception.Message)"
+    }
+    finally {
+        if ($null -ne $client) { $client.Dispose() }
     }         
 }
