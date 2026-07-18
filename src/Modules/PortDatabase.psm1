@@ -2,7 +2,6 @@ function Get-WebPorts {
 
     $client = [System.Net.Http.HttpClient]::new()
     
-    # 1. TAMBAHAN PENTING: Menambahkan User-Agent agar tidak diblokir oleh sistem anti-bot IANA
     $client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     try {
@@ -10,7 +9,6 @@ function Get-WebPorts {
         
         $xmlString = $client.GetStringAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
         
-        # 2. VALIDASI KEAMANAN: Pastikan string yang diunduh tidak kosong
         if ([string]::IsNullOrWhiteSpace($xmlString)) {
             throw "Data XML yang diunduh dari IANA kosong. Periksa koneksi internet Anda atau kemungkinan server IANA sedang down."
         }
@@ -52,7 +50,6 @@ function Get-WebPorts {
         Write-Verbose -Message "File created at $portsPath"
     }
     catch {
-        # Error handling yang lebih rapi
         Write-Error "Gagal memproses data Web Ports. Detail: $($_.Exception.Message)"
         throw $_ # Melempar error ke atas agar ditangkap oleh blok pemanggil (index.ps1)
     }
