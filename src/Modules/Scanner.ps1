@@ -61,7 +61,7 @@ function scanner {
 
     if ($needsUpdate) {
         # Pastikan modul dimuat
-        $modulePath = Join-Path $PSScriptRoot "PortDatabase.psm1"
+        $modulePath = [System.IO.Path]::Combine($PSScriptRoot, 'PortDatabase.psm1')
         if (-not (Get-Module -Name PortDatabase)) {
             Import-Module $modulePath -Force -ErrorAction Stop
         }
