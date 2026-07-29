@@ -38,20 +38,9 @@ function scanner {
 	    }
 
         # PERSIAPAN ARRAY PORT 
-        $portsToScan = @()
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'portToScan.ps1')))"
         
-        if ($quickScan) {
-            $ConfigPath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Support', 'QuickScanPorts.psd1')
-            $ConfigData = Import-PowerShellDataFile -Path $ConfigPath
-            $portsToScan = [int[]]$ConfigData.QuickScanPorts
-        }
-        elseif ($ports -and $ports.Count -gt 0) {
-            $portsToScan = [int[]]$ports
-        }
-        else {
-            $portsToScan = [int[]]($pMin..$pMax)
-        }
-
+        $portsToScan = portToScan
         $totalPorts = $portsToScan.Count
 
         # Pastikan ada port yang akan di-scan untuk menghindari error perhitungan
