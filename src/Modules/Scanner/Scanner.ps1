@@ -14,7 +14,7 @@ function scanner {
     }
 
     # DATABASE SERVICE PORT
-    $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'ports.txt')
+    $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Support', 'ports.txt')
 
     function populatePortsHash {
         $portsHashTable = @{}
@@ -61,7 +61,7 @@ function scanner {
 
     if ($needsUpdate) {
         # Pastikan modul dimuat
-        $modulePath = [System.IO.Path]::Combine($PSScriptRoot, 'PortDatabase.psm1')
+        $modulePath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'PortDatabase.psm1')
         if (-not (Get-Module -Name PortDatabase)) {
             Import-Module $modulePath -Force -ErrorAction Stop
         }
@@ -99,7 +99,7 @@ function scanner {
         $portsToScan = @()
         
         if ($quickScan) {
-            $ConfigPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'QuickScanPorts.psd1')
+            $ConfigPath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Support', 'QuickScanPorts.psd1')
             $ConfigData = Import-PowerShellDataFile -Path $ConfigPath
             $portsToScan = [int[]]$ConfigData.QuickScanPorts
         }
