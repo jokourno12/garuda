@@ -16,68 +16,10 @@ function scanner {
     # DATABASE SERVICE PORT
     $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Support', 'ports.txt')
 
-    function populatePortsHash {
-        $portsHashTable = @{}
-    
-        # Menggunakan Get-Content dengan error handling sederhana
-        $lines = Get-Content -Path $PortListPath -ErrorAction SilentlyContinue
-    
-        foreach ($line in $lines) {
-            if (-not [string]::IsNullOrWhiteSpace($line)) {
-                $HashTableData = $line.Split("|")
-            
-                if ($HashTableData.Count -ge 4) {
-                    try {
-                        $port = [int]$HashTableData[0]
-                        $value = "{0}|{1}" -f $HashTableData[2], $HashTableData[3]
-                    
-                        $portsHashTable[$port] = $value
-                    }
-                    catch {
-                        Write-Warning "Gagal memproses baris: $line"
-                    }
-                }
-            }
-        }
-        return $portsHashTable
-    }
+    . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'populatePortsHash.ps1')))"
+    . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'updatePortDatabase.ps1')))"
 
-
-    $needsUpdate = $true
-
-    if (Test-Path -Path $PortListPath -PathType Leaf) {
-        $fileInfo = Get-Item -Path $PortListPath
-        
-        if ($fileInfo.CreationTime -gt (Get-Date).AddDays(-28)) {
-            Write-Verbose -Message "Read ports.txt and fill hash table..."
-            $portsHashTable = populatePortsHash
-            $needsUpdate = $false
-        } else {
-            Write-Host "File ports.txt sudah usang (>28 hari). Memperbarui data..."
-        }
-    } else {
-        Write-Host "File ports.txt tidak ditemukan. Memulai proses pembuatan..."
-    }
-
-    if ($needsUpdate) {
-        # Pastikan modul dimuat
-        $modulePath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'PortDatabase.psm1')
-        if (-not (Get-Module -Name PortDatabase)) {
-            Import-Module $modulePath -Force -ErrorAction Stop
-        }
-
-        # Jalankan proses update
-        getWebPorts
-        getVersion
-
-        # Cek sekali saja setelah proses update
-        if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
-            throw "Kritis: getWebPorts gagal membuat atau memperbarui $PortListPath"
-        }
-
-        Write-Host "[+] File ports.txt berhasil dibuat atau diperbarui." -ForegroundColor Green
-        $portsHashTable = populatePortsHash
-    }
+    $portsHashTable = updatePortDatabase
 
 	# INITIALIZATION RESULT SCAN
     $result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new() #required for multithreading
