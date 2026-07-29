@@ -1,4 +1,4 @@
-. "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', 'Modules', 'Scanner.ps1')))"
+. "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', 'Modules', 'Scanner', 'Scanner.ps1')))"
 
 function quickScanCommand {
 [CmdletBinding()]
