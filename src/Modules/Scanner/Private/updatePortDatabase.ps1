@@ -9,33 +9,29 @@ function updatePortDatabase {
             $portsHashTable = populatePortsHash
             $needsUpdate = $false
         } else {
-            Write-Host "File ports.txt sudah usang (>28 hari). Memperbarui data..."
+            Write-Host "File ports.txt outdated (>28 hari). Updating data..."
         }
     } else {
-        Write-Host "File ports.txt tidak ditemukan. Memulai proses pembuatan..."
+        Write-Host "File ports.txt not found. Starting the creation process..."
     }
 
     if ($needsUpdate) {
-        # Pastikan modul dimuat
         $modulePath = [System.IO.Path]::Combine($PSScriptRoot, '..\..', 'PortDatabase.psm1')
 
         if (-not (Get-Module -Name PortDatabase)) {
             Import-Module $modulePath -Force -ErrorAction Stop
         }
 
-        # Jalankan proses update
         getWebPorts
         getVersion
 
-        # Cek sekali saja setelah proses update
         if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
-            throw "Kritis: getWebPorts gagal membuat atau memperbarui $PortListPath"
+            throw "Critical: getWebPorts failed to create or update $PortListPath"
         }
 
-        Write-Host "[+] File ports.txt berhasil dibuat atau diperbarui." -ForegroundColor Green
+        Write-Host "[+] File ports.txt successfully created or updated." -ForegroundColor Green
         $portsHashTable = populatePortsHash
     }
 
-    # Satu-satunya tambahan: Kita harus melempar hasil $portsHashTable ke pemanggil
     return $portsHashTable
 }
