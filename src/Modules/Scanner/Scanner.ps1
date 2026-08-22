@@ -26,13 +26,11 @@ function scanner {
 
     foreach ($target in $targets) {
         try {
-    	    # Ambil IP pertama dari hasil resolusi DNS (Bisa IPv4 atau IPv6)
     	    $resolvedIP = [System.Net.Dns]::GetHostAddresses($target)[0]
     
     	    $TargetIP = $resolvedIP.IPAddressToString
-    	    $TargetFamily = $resolvedIP.AddressFamily # Ini akan otomatis berisi InterNetwork atau InterNetworkV6
-		}
-		catch {
+    	    $TargetFamily = $resolvedIP.AddressFamily
+        }catch {
     	    Write-Warning "Gagal menemukan IP untuk host: $target. Melewati target ini..."
     		continue
 	    }
@@ -52,9 +50,9 @@ function scanner {
                 $portsToScan = $using:portsToScan
                 $port = $portsToScan[$index]
                 
-                $Target = $using:target           # Nama host (untuk output)
-                $TargetIP = $using:TargetIP       # IP Address murni (untuk koneksi)
-				$TargetFamily = $using:TargetFamily
+                $Target = $using:target
+                $TargetIP = $using:TargetIP
+                $TargetFamily = $using:TargetFamily
                 $portsHashTable = $using:portsHashTable
                 $portInt = [Int] $port
                 $localResult = $using:result
@@ -113,15 +111,12 @@ function scanner {
                             $localResult[$key] = $r
                         }
                         else {
-                            # Server membalas dengan cepat, tetapi berupa penolakan (TCP RST)
                             Write-Verbose -Message "$Target 'port' $port 'Closed - Refused'" -Verbose
                         }
                     }
-                }
-				catch {
+                }catch {
     		        Write-Verbose -Message "$Target 'port' $port 'Error: $($_.Exception.Message)'" -Verbose
-		        }
-                finally {
+		}finally {
                     $obj.Close()
                     $obj.Dispose()
                 }
