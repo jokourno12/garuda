@@ -2,7 +2,6 @@
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'DiscoverCommand.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'QuickScanCommand.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'FullScanCommand.ps1'))"
-. "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'CustomScanCommand.ps1'))"
 
 #Support
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
@@ -28,40 +27,16 @@ function discoverEngine {
 function quickScanEngine {
 	[CmdletBinding()]
 	param(
-        [string[]]$targets,
-        [switch]$quickScan,
-        [int]$pMin,
-        [int]$pMax,
-        [string[]]$ports
+            [string[]]$targets,
+            [switch]$quickScan
     )
 
     quickScanCommand `
         -targets $targets `
-        -quickScan:$quickScan `
-        -pMin $pMin `
-        -pMax $pMax `
-        -ports $ports
+        -quickScan:$quickScan
 }
 
 function fullScanEngine {
-	[CmdletBinding()]
-	param(
-        [string[]]$targets,
-        [switch]$quickScan,
-        [int]$pMin,
-        [int]$pMax,
-        [string[]]$ports
-    )
-
-    quickScanCommand `
-        -targets $targets `
-        -quickScan:$quickScan `
-        -pMin $pMin `
-        -pMax $pMax `
-        -ports $ports
-}
-
-function customScanEngine {
 	[CmdletBinding()]
 	param(
         [string[]]$targets,
