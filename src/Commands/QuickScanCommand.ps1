@@ -4,16 +4,10 @@ function quickScanCommand {
 [CmdletBinding()]
 param(
         [string[]]$targets,
-        [switch]$quickScan,
-        [int]$pMin,
-        [int]$pMax,
-        [string[]]$ports
+        [switch]$quickScan
     )
 
     scanner `
         -targets $targets `
-        -quickScan:$quickScan `
-        -pMin $pMin `
-        -pMax $pMax `
-        -ports $ports
+        -quickScan:$quickScan
 }

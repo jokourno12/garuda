@@ -1,7 +1,6 @@
 function populatePortsHash {
     $portsHashTable = @{}
  
-    # Menggunakan Get-Content dengan error handling sederhana
     $lines = Get-Content -Path $PortListPath -ErrorAction SilentlyContinue
  
     foreach ($line in $lines) {
@@ -16,7 +15,7 @@ function populatePortsHash {
                     $portsHashTable[$port] = $value
                 }
                 catch {
-                    Write-Warning "Gagal memproses baris: $line"
+                    Write-Warning "Failed to process line: $line"
                 }
             }
         }
