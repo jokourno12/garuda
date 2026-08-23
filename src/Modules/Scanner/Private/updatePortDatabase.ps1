@@ -9,7 +9,7 @@ function updatePortDatabase {
             $portsHashTable = populatePortsHash
             $needsUpdate = $false
         } else {
-            Write-Host "File ports.txt outdated (>28 hari). Updating data..."
+            Write-Host "File ports.txt outdated (>28 days). Updating data..."
         }
     } else {
         Write-Host "File ports.txt not found. Starting the creation process..."

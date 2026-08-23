@@ -5,12 +5,12 @@ function getWebPorts {
     $client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     try {
-        Write-Host "Mengunduh database port dari IANA..." -ForegroundColor Red
+        Write-Host "Downloading port database from IANA..." -ForegroundColor Red
         
         $xmlString = $client.GetStringAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
         
         if ([string]::IsNullOrWhiteSpace($xmlString)) {
-            throw "Data XML yang diunduh dari IANA kosong. Periksa koneksi internet Anda atau kemungkinan server IANA sedang down."
+            throw "XML data downloaded from IANA is empty. Check your internet connection or the possibility that the IANA server is down."
         }
 
         [xml]$LatestPorts = [System.Xml.XmlDocument]::new()
@@ -50,8 +50,8 @@ function getWebPorts {
         Write-Verbose -Message "File created at $portsPath"
     }
     catch {
-        Write-Error "Gagal memproses data Web Ports. Detail: $($_.Exception.Message)"
-        throw $_ # Melempar error ke atas agar ditangkap oleh blok pemanggil (index.ps1)
+        Write-Error "Failed to process Web Ports data. Detail: $($_.Exception.Message)"
+        throw $_
     }
     finally {
         if ($null -ne $client) { $client.Dispose() }
@@ -80,7 +80,7 @@ function getVersion {
         }          
     }
     catch {
-        Write-Warning "Gagal mengecek pembaruan versi. Detail: $($_.Exception.Message)"
+        Write-Warning "Failed to check for version update. Detail: $($_.Exception.Message)"
     }
     finally {
         if ($null -ne $client) { $client.Dispose() }
