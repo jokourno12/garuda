@@ -21,7 +21,7 @@ param(
 showBanner
 
 if ($help) {
-        helpEngine
+	helpEngine
 	return
 }
 

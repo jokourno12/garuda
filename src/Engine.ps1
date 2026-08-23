@@ -11,7 +11,45 @@ function showBanner {
 }
 
 function helpEngine {
-    Write-Host "Hello World From Help"
+    $helpText = @"
+
+=======================================
+           GARUDA HELP MENU
+=======================================
+
+[ INSTALLATION & PREPARATION ]
+To use this tool, please clone the repository and navigate to its directory:
+  git clone https://github.com/jokourno12/garuda
+  cd garuda
+
+[ COMMAND USAGE EXAMPLES ]
+
+1. Display this help menu:
+   .\src\index.ps1 -help
+
+2. Perform Discovery (without port scanning):
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -discover
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id", "192.168.1.2" -discover
+
+3. Perform Quick Scan (using default ports):
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -quickScan
+
+4. Perform Full Scan (Ports 1 - 65535):
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan
+
+5. Perform Scan with Custom Port Range (e.g., ports 100 to 1000):
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan -pMin 100 -pMax 1000
+
+6. Perform Scan with Specific Ports:
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan -ports "80", "443", "8080"
+
+7. Perform Combined Scan (Custom Range and Specific Ports):
+   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan -pMin 1000 -pMax 2000 -ports "80", "443"
+
+=======================================
+"@
+    
+    Write-Host $helpText -ForegroundColor Cyan
 }
 
 function discoverEngine {
@@ -46,7 +84,7 @@ function fullScanEngine {
         [string[]]$ports
     )
 
-    quickScanCommand `
+    fullScanCommand `
         -targets $targets `
         -quickScan:$quickScan `
         -pMin $pMin `
