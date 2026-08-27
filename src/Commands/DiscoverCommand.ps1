@@ -1,3 +1,5 @@
+. "$([System.IO.Path]::Combine($PSScriptRoot, '..', 'Runtime', 'Windows.ps1'))"
+
 function Get-IpRange {
     [CmdletBinding()]
     param (
@@ -8,7 +10,7 @@ function Get-IpRange {
     $regex = '^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/(?:[0-9]|[1-2][0-9]|3[0-2])$'
     
     if ($Subnet -notmatch $regex) {
-        Write-Host "[!] Peringatan: Input '$Subnet' bukan format IP/CIDR yang valid (Maksimal CIDR adalah /32)." -ForegroundColor Yellow
+        Write-Host "[!] Peringatan: Input '$Subnet' bukan format IP/CIDR yang valid (Maksimal CIDR adalah /32)." @Cha
         return
     }
 
@@ -89,7 +91,7 @@ function discoverCommand {
             foreach ($ip in $ipRange | Sort-Object) {
 
                 if ($reachableTargets[$ip]) {
-                    Write-Host "$ip is reachable" -ForegroundColor Green
+                    Write-Host "$ip is reachable" @App
                 }
                 else {
                     Write-Verbose "$ip is not reachable"
@@ -114,18 +116,18 @@ function discoverCommand {
             finally { $pingSingle.Dispose() }
             
             if ($isReachableSingle) {
-                Write-Host "$target is reachable" -ForegroundColor Green
+                Write-Host "$target is reachable" @App
                 $reachableTargets[$target] = $true 
             }
             else {
-                Write-Host "$target is not reachable" -ForegroundColor Yellow
+                Write-Host "$target is not reachable" @Cha
             }
         }
     }
 
     if ($VerbosePreference -ne 'SilentlyContinue') {
 
-        Write-Host "`nReachable Hosts:" -ForegroundColor Cyan
+        Write-Host "`nReachable Hosts:" @Net
 
         foreach ($ip in $reachableTargets.Keys | Sort-Object) {
             if ($reachableTargets[$ip]) {

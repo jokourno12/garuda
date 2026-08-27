@@ -1,3 +1,5 @@
+. "$([System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Runtime', 'Windows.ps1'))"
+
 function scanner {
     param(
         [string[]]$targets,
@@ -9,8 +11,7 @@ function scanner {
 
     # ARGUMENT VALIDATION
     if ($targets[0] -eq "") {
-        Write-Host "You must specify at least one target with -targets.`nExiting now." -ForegroundColor Red
-        exit
+        Write-Host "You must specify at least one target with -targets.`nExiting now." @Pen
     }
 
     # DATABASE SERVICE PORT
