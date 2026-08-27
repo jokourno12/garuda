@@ -1,3 +1,5 @@
+. "$([System.IO.Path]::Combine($PSScriptRoot, '..', 'Runtime', 'Windows.ps1'))"
+
 function getWebPorts {
 
     $client = [System.Net.Http.HttpClient]::new()
@@ -5,7 +7,7 @@ function getWebPorts {
     $client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     try {
-        Write-Host "Downloading port database from IANA..." -ForegroundColor Red
+        Write-Host "Downloading port database from IANA..." @Pen
         
         $xmlString = $client.GetStringAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
         
@@ -76,7 +78,7 @@ function getVersion {
         $remoteVersion = [version]$remoteModule.ModuleVersion
 
         if ($localVersion.Major -lt $remoteVersion.Major) {
-            Write-Host "A new version ($remoteVersion) is available. Please update your module." -ForegroundColor Yellow
+            Write-Host "A new version ($remoteVersion) is available. Please update your module." @Cha
         }          
     }
     catch {

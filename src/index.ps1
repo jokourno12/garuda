@@ -15,7 +15,7 @@ param(
 	[string[]]$ports
 )
 
-# Memuat isi Engine.ps1 ke sesi saat ini
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Runtime', 'Windows.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Engine.ps1'))"
 
 showBanner
@@ -26,14 +26,14 @@ if ($help) {
 }
 
 if (-not $targets) {
-	Write-Host "Error: You must enter the target (IP or Domain)." -ForegroundColor Red
+	Write-Host "Error: You must enter the target (IP or Domain)." @Pen
 	return
 }
 
 if ($quickScan) {
 	if ($PSBoundParameters.ContainsKey('pMin') -or $PSBoundParameters.ContainsKey('pMax') -or $PSBoundParameters.ContainsKey('ports')) {
-		Write-Host "Error: Parameter port (-pMin, -pMax, -ports) not supported in mode -quickScan." -ForegroundColor Red
-		Write-Host "Please use -fullScan to perform a scan with a custom port." -ForegroundColor Yellow
+		Write-Host "Error: Parameter port (-pMin, -pMax, -ports) not supported in mode -quickScan." @pen
+		Write-Host "Please use -fullScan to perform a scan with a custom port." @Cha
 		return
 	}
 }

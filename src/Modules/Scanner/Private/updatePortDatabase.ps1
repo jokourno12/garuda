@@ -1,3 +1,5 @@
+. "$([System.IO.Path]::Combine($PSScriptRoot, '..', '..', '..', 'Runtime', 'Windows.ps1'))"
+
 function updatePortDatabase {
     $needsUpdate = $true
 
@@ -9,10 +11,10 @@ function updatePortDatabase {
             $portsHashTable = populatePortsHash
             $needsUpdate = $false
         } else {
-            Write-Host "File ports.txt outdated (>28 days). Updating data..."
+            Write-Host "File ports.txt outdated (>28 days). Updating data..." @Cha
         }
     } else {
-        Write-Host "File ports.txt not found. Starting the creation process..."
+        Write-Host "File ports.txt not found. Starting the creation process..." @Cha
     }
 
     if ($needsUpdate) {
@@ -29,7 +31,7 @@ function updatePortDatabase {
             throw "Critical: getWebPorts failed to create or update $PortListPath"
         }
 
-        Write-Host "[+] File ports.txt successfully created or updated." -ForegroundColor Green
+        Write-Host "[+] File ports.txt successfully created or updated." @App
         $portsHashTable = populatePortsHash
     }
 
