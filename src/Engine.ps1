@@ -6,6 +6,9 @@
 #Support
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
 
+#Runtime
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Runtime', 'Windows.ps1'))"
+
 function showBanner {
     supportBanner
 }
@@ -28,28 +31,28 @@ To use this tool, please clone the repository and navigate to its directory:
    .\src\index.ps1 -help
 
 2. Perform Discovery (without port scanning):
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -discover
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id", "192.168.1.2" -discover
+   .\src\index.ps1 -targets "example.com" -discover
+   .\src\index.ps1 -targets "example.com", "10.0.0.1" -discover
 
 3. Perform Quick Scan (using default ports):
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -quickScan
+   .\src\index.ps1 -targets "example.com" -quickScan
 
 4. Perform Full Scan (Ports 1 - 65535):
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan
+   .\src\index.ps1 -targets "example.com" -fullScan
 
 5. Perform Scan with Custom Port Range (e.g., ports 100 to 1000):
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan -pMin 100 -pMax 1000
+   .\src\index.ps1 -targets "example.com" -fullScan -pMin 100 -pMax 1000
 
 6. Perform Scan with Specific Ports:
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan -ports "80", "443", "8080"
+   .\src\index.ps1 -targets "example.com" -fullScan -ports "80", "443", "8080"
 
 7. Perform Combined Scan (Custom Range and Specific Ports):
-   .\src\index.ps1 -targets "vpnku.telkomsigma.co.id" -fullScan -pMin 1000 -pMax 2000 -ports "80", "443"
+   .\src\index.ps1 -targets "example.com" -fullScan -pMin 1000 -pMax 2000 -ports "80", "443"
 
 =======================================
 "@
     
-    Write-Host $helpText -ForegroundColor Cyan
+    Write-Host $helpText @Net
 }
 
 function discoverEngine {
