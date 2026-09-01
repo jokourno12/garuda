@@ -16,84 +16,117 @@ function scanner {
             [array]$OpenPorts
         )
 
-        Write-Host "`nStarting Layer 7 scanning on $($OpenPorts.Count) open port..." @Net
+        $denoCmd = Get-Command deno -ErrorAction SilentlyContinue
 
-        $l7Result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new()
-
-        $OpenPorts | ForEach-Object -Parallel {
-            $item = $_
-            $target = $item.Host
-            $port = $item.Port
-            $key = $target + ":" + $port
+        if ($null -ne $denoCmd) {
+            Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net
             
-            $banner = "No Banner / Timeout"
-
+            $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js')
+            
+            # Menggunakan Temporary File untuk menjembatani data (Mencegah Deadlock Stdin)
+            $tempFile = [System.IO.Path]::GetTempFileName()
+            
             try {
-                $tcpClient = [System.Net.Sockets.TcpClient]::new()
-                $connect = $tcpClient.BeginConnect($target, $port, $null, $null)
-                $wait = $connect.AsyncWaitHandle.WaitOne(1000, $false)
-
-                if ($wait -and $tcpClient.Connected) {
-                    $tcpClient.EndConnect($connect)
+                $OpenPorts | ConvertTo-Json -Compress | Out-File -FilePath $tempFile -Encoding utf8
+                
+                # Eksekusi Deno dengan akses baca ke temp file
+                $denoOutput = & deno run --allow-net --allow-read $scriptPath $tempFile
+                
+                if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
+                    $l7Output = $denoOutput | ConvertFrom-Json
                     
-                    $stream = $tcpClient.GetStream()
-                    $stream.ReadTimeout = 2000 
-                    $stream.WriteTimeout = 2000
-                    
-                    $activeStream = $stream
-
-                    # Negosiasi TLS/SSL untuk port HTTPS
-                    if ($port -in 443, 8443) {
-                        $sslStream = [System.Net.Security.SslStream]::new($stream)
-                        $sslStream.AuthenticateAsClient($target)
-                        $activeStream = $sslStream
+                    if ($null -ne $l7Output -and $l7Output.Count -gt 0) {
+                        $l7Output | Sort-Object Host, Port | Format-Table -AutoSize
+                    } else {
+                        Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
                     }
-
-                    # Kirim Payload HTTP/1.1 dengan Host Header
-                    if ($port -in 80, 8080, 443, 8443) {
-                        $writer = [System.IO.StreamWriter]::new($activeStream)
-                        $writer.WriteLine("HEAD / HTTP/1.1")
-                        $writer.WriteLine("Host: $target")
-                        $writer.WriteLine("Connection: close")
-                        $writer.WriteLine("")
-                        $writer.Flush()
-                    }
-
-                    $reader = [System.IO.StreamReader]::new($activeStream)
-                    $readTask = $reader.ReadLineAsync()
-                    
-                    if ($readTask.Wait(2000)) {
-                        $bannerData = $readTask.Result
-                        if (-not [string]::IsNullOrWhiteSpace($bannerData)) {
-                            $banner = $bannerData.Trim()
-                        }
-                    }
+                } else {
+                    Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
                 }
             } catch {
-                $banner = "Error: $($_.Exception.Message)"
+                Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen
             } finally {
-                if ($null -ne $tcpClient) {
-                    $tcpClient.Close()
-                    $tcpClient.Dispose()
-                }
+                if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force }
             }
-
-            $r = [PSCustomObject]@{
-                Host = $target
-                Port = $port
-                L4_Service = $item.Service
-                L7_Banner = $banner
-            }
-            $localResult = $using:l7Result
-            $localResult[$key] = $r
-        } -ThrottleLimit 15
-
-        $validL7 = $l7Result.Values | Where-Object { $_.L7_Banner -ne "No Banner / Timeout" }
-
-        if ($validL7.Count -gt 0) {
-            $validL7 | Sort-Object Host, Port | Format-Table -AutoSize
         } else {
-            Write-Host "`nNo service returns a banner at Layer 7." @Cha
+            Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha
+            Write-Host "Starting native PowerShell Layer 7 scanning on $($OpenPorts.Count) open port..." @Net
+
+            $l7Result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new()
+
+            $OpenPorts | ForEach-Object -Parallel {
+                $item = $_
+                $target = $item.Host
+                $port = $item.Port
+                $key = $target + ":" + $port
+                
+                $banner = "No Banner / Timeout"
+
+                try {
+                    $tcpClient = [System.Net.Sockets.TcpClient]::new()
+                    $connect = $tcpClient.BeginConnect($target, $port, $null, $null)
+                    $wait = $connect.AsyncWaitHandle.WaitOne(1000, $false)
+
+                    if ($wait -and $tcpClient.Connected) {
+                        $tcpClient.EndConnect($connect)
+                        
+                        $stream = $tcpClient.GetStream()
+                        $stream.ReadTimeout = 2000 
+                        $stream.WriteTimeout = 2000
+                        
+                        $activeStream = $stream
+
+                        if ($port -in 443, 8443) {
+                            $sslStream = [System.Net.Security.SslStream]::new($stream)
+                            $sslStream.AuthenticateAsClient($target)
+                            $activeStream = $sslStream
+                        }
+
+                        if ($port -in 80, 8080, 443, 8443) {
+                            $writer = [System.IO.StreamWriter]::new($activeStream)
+                            $writer.WriteLine("HEAD / HTTP/1.1")
+                            $writer.WriteLine("Host: $target")
+                            $writer.WriteLine("Connection: close")
+                            $writer.WriteLine("")
+                            $writer.Flush()
+                        }
+
+                        $reader = [System.IO.StreamReader]::new($activeStream)
+                        $readTask = $reader.ReadLineAsync()
+                        
+                        if ($readTask.Wait(2000)) {
+                            $bannerData = $readTask.Result
+                            if (-not [string]::IsNullOrWhiteSpace($bannerData)) {
+                                $banner = $bannerData.Trim()
+                            }
+                        }
+                    }
+                } catch {
+                    $banner = "Error: $($_.Exception.Message)"
+                } finally {
+                    if ($null -ne $tcpClient) {
+                        $tcpClient.Close()
+                        $tcpClient.Dispose()
+                    }
+                }
+
+                $r = [PSCustomObject]@{
+                    Host = $target
+                    Port = $port
+                    L4_Service = $item.Service
+                    L7_Banner = $banner
+                }
+                $localResult = $using:l7Result
+                $localResult[$key] = $r
+            } -ThrottleLimit 15
+
+            $validL7 = $l7Result.Values | Where-Object { $_.L7_Banner -ne "No Banner / Timeout" }
+
+            if ($validL7.Count -gt 0) {
+                $validL7 | Sort-Object Host, Port | Format-Table -AutoSize
+            } else {
+                Write-Host "`nNo service returns a banner at Layer 7." @Cha
+            }
         }
     }
 
@@ -107,8 +140,8 @@ function scanner {
 
         $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Support', 'ports.txt')
 
-        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'populatePortsHash.ps1')))"
-        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'updatePortDatabase.ps1')))"
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PopulatePortsHash.ps1')))"
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'UpdatePortDatabase.ps1')))"
 
         $portsHashTable = updatePortDatabase
 
@@ -124,7 +157,7 @@ function scanner {
                 continue
             }
 
-            . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'portToScan.ps1')))"
+            . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))"
             
             $portsToScan = portToScan
             $totalPorts = $portsToScan.Count
