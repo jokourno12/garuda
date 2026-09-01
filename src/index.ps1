@@ -52,8 +52,8 @@ Ports: $ports
 
 # Memanggil function yang ada di Engine.ps1
 if ($discover) {
-	discoverEngine -targets $targets
-	return
+    discoverEngine -targets $targets
+    return
 }
 
 if ($quickScan) {
