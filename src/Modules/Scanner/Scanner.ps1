@@ -140,8 +140,8 @@ function scanner {
 
         $PortListPath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Support', 'ports.txt')
 
-        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'populatePortsHash.ps1')))"
-        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'updatePortDatabase.ps1')))"
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PopulatePortsHash.ps1')))"
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'UpdatePortDatabase.ps1')))"
 
         $portsHashTable = updatePortDatabase
 
@@ -157,7 +157,7 @@ function scanner {
                 continue
             }
 
-            . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'portToScan.ps1')))"
+            . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))"
             
             $portsToScan = portToScan
             $totalPorts = $portsToScan.Count
