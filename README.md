@@ -45,5 +45,5 @@ We ruthlessly eliminate waste to keep Garuda fast, lightweight, and rock-solid r
    ```
 5. Display the help information:
    ```bash
-   .\src\index.ps1 -help
+   ./src/index.ps1 -help
    ```
