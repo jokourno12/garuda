@@ -14,3 +14,40 @@ We ruthlessly eliminate waste to keep Garuda fast, lightweight, and rock-solid r
 - **Over Processing**: Tailored compute strategies; distributing workloads via multi-core Parallel execution for heavy computations, while enforcing strict Serial or Concurrent pipelines when absolute data consistency is mandatory.
 - **Over Production**: Pure essentialism; building strictly what is necessary, completely eliminating architectural gold-plating and feature creep.
 - **Defect**: Leak-free engineering; preventing race conditions and memory leaks by enforcing strict thread-safety and rigorous lifecycle management (Dispose) across all deployed execution models.
+
+## Quick Start
+1. Install PowerShell 7:
+   - **Windows**:
+     ```cmd
+     winget install --id Microsoft.Powershell --source winget
+     ```
+   - **Linux**:
+     ```bash
+     sudo apt update && sudo apt install snapd
+     sudo snap install powershell --classic
+     ```
+   - **macOS**:
+     ```bash
+     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+     brew install --cask powershell
+     ```
+2. Launch PowerShell 7:
+   ```bash
+   pwsh
+   ```
+3. Clone repository:
+   ```bash
+   git clone https://github.com/jokourno12/garuda
+   ```
+4. Navigate to the repository directory:
+   ```bash
+   cd garuda
+   ```
+5. Display the help information:
+   ```bash
+   ./src/index.ps1 -help
+   ```
+Note (Windows): If script execution is blocked by the default Windows Execution Policy, run the following command in your PowerShell session before executing the script:
+```bash
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+```

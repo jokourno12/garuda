@@ -20,11 +20,6 @@ function helpEngine {
            GARUDA HELP MENU
 =======================================
 
-[ INSTALLATION & PREPARATION ]
-To use this tool, please clone the repository and navigate to its directory:
-  git clone https://github.com/jokourno12/garuda
-  cd garuda
-
 [ COMMAND USAGE EXAMPLES ]
 
 1. Display this help menu:
