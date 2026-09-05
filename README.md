@@ -17,18 +17,18 @@ We ruthlessly eliminate waste to keep Garuda fast, lightweight, and rock-solid r
 
 ## Quick Start
 1. Install PowerShell 7:
-   - **Windows** :
+   - **Windows**:
      ```cmd
      winget install --id Microsoft.Powershell --source winget
      ```
-   - **Linux** :
+   - **Linux**:
      ```bash
      sudo apt update && sudo apt install snapd
      sudo snap install powershell --classic
      ```
-   - **macOS** :
+   - **macOS**:
      ```bash
-     /bin/bash -c "$(curl -fsSL [https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh](https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh))"
+     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
      brew install --cask powershell
      ```
 2. Launch PowerShell 7:
@@ -39,11 +39,11 @@ We ruthlessly eliminate waste to keep Garuda fast, lightweight, and rock-solid r
    ```bash
    git clone https://github.com/jokourno12/garuda
    ```
-4. Move into main directory:
+4. Navigate to the repository directory:
    ```bash
    cd garuda
    ```
-5. Help command to show how to use:
+5. Display the help information:
    ```bash
    .\src\index.ps1 -help
    ```
