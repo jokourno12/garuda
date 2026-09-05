@@ -47,3 +47,7 @@ We ruthlessly eliminate waste to keep Garuda fast, lightweight, and rock-solid r
    ```bash
    ./src/index.ps1 -help
    ```
+Note (Windows): If script execution is blocked by the default Windows Execution Policy, run the following command in your PowerShell session before executing the script:
+```bash
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+```
