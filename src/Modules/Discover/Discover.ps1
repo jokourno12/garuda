@@ -41,6 +41,27 @@ function discover {
                     $pingSender.Dispose()
                 }
 
+                # --- INJEKSI LOGIKA LAYER 4 (TCP FALLBACK) ---
+                if (-not $isReachable) {
+                    foreach ($port in @(443, 80)) {
+                        if ($isReachable) { break }
+                        $tcpClient = [System.Net.Sockets.TcpClient]::new()
+                        try {
+                            $connectResult = $tcpClient.BeginConnect($ip, $port, $null, $null)
+                            $success = $connectResult.AsyncWaitHandle.WaitOne(1000, $true)
+                            if ($success -and $tcpClient.Connected) {
+                                $isReachable = $true
+                            }
+                        }
+                        catch {}
+                        finally {
+                            $tcpClient.Close()
+                            $tcpClient.Dispose()
+                        }
+                    }
+                }
+                # ---------------------------------------------
+
                 if ($isReachable) {
                     $localResult[$ip] = $true
                 }
@@ -77,6 +98,33 @@ function discover {
             catch { $isReachableSingle = $false }
             finally { $pingSingle.Dispose() }
             
+            # --- INJEKSI LOGIKA LAYER 4 (TCP FALLBACK) ---
+            $method = "ICMP"
+            if (-not $isReachableSingle) {
+                # Memberikan informasi bahwa ICMP gagal dan lanjut ke Layer 4
+                Write-Host " [*] Layer ICMP possible blocked for $target." @Cha
+                Write-Host " [*] Attempting Layer 4 (TCP)..." @Inc
+
+                foreach ($port in @(443, 80)) {
+                    if ($isReachableSingle) { break }
+                    $tcpClientSingle = [System.Net.Sockets.TcpClient]::new()
+                    try {
+                        $connectResult = $tcpClientSingle.BeginConnect($target, $port, $null, $null)
+                        $success = $connectResult.AsyncWaitHandle.WaitOne(1000, $true)
+                        if ($success -and $tcpClientSingle.Connected) {
+                            $isReachableSingle = $true
+                            $method = "TCP/$port" # Mencatat port yang berhasil
+                        }
+                    }
+                    catch {}
+                    finally {
+                        $tcpClientSingle.Close()
+                        $tcpClientSingle.Dispose()
+                    }
+                }
+            }
+            # ---------------------------------------------
+
             if ($isReachableSingle) {
                 Write-Host "$target is reachable" @App
                 $reachableTargets[$target] = $true 
