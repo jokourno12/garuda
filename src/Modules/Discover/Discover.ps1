@@ -71,15 +71,25 @@ function discover {
                 }
             } -ThrottleLimit 15
 
+            $reachableCount = 0
+
             foreach ($ip in $ipRange | Sort-Object) {
 
                 if ($reachableTargets[$ip]) {
                     Write-Host "$ip is reachable" @App
+                    $reachableCount++
                 }
                 else {
                     Write-Verbose "$ip is not reachable"
                 }
             }
+
+            if ($reachableCount -eq 0) {
+                Write-Host " [*] Layer 3 ICMP Checked." @Dim
+                Write-Host " [*] Layer 4 TCP Checked." @Dim
+                Write-Host " [*] All IPs in subnet $target are not reachable." @Cha
+            }
+
         }
         else {
 
