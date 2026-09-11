@@ -73,10 +73,35 @@ function discover {
 
             $reachableCount = 0
 
+            # --- INJEKSI LOGIKA MAC ADDRESS (SUBNET) ---
+            $showMac = $false
+            # Cek apakah target adalah IP Privat (10.x, 172.16-31.x, 192.168.x)
+            if ($target -match '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)') {
+                # Pastikan ada minimal 1 IP yang reachable agar tidak bertanya sia-sia
+                $hasReachable = $false
+                foreach ($key in $reachableTargets.Keys) { if ($reachableTargets[$key]) { $hasReachable = $true; break } }
+                
+                if ($hasReachable) {
+                    Write-Host " [*] Internal IP Detected ($target)." @Cha
+                    $ask = Read-Host " [*] Show MAC Address? (Y/N)"
+                    if ($ask -match '^[Yy]') { $showMac = $true }
+                }
+            }
+            # -------------------------------------------
+
             foreach ($ip in $ipRange | Sort-Object) {
 
                 if ($reachableTargets[$ip]) {
-                    Write-Host "$ip is reachable" @App
+                    # --- INJEKSI OUTPUT MAC ---
+                    if ($showMac) {
+                        $mac = (Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
+                        if (-not $mac) { $mac = "N/A" }
+                        Write-Host "$ip is reachable [MAC: $mac]" @App
+                    }
+                    else {
+                        Write-Host "$ip is reachable" @App
+                    }
+                    # --------------------------
                     $reachableCount++
                 }
                 else {
@@ -136,7 +161,24 @@ function discover {
             # ---------------------------------------------
 
             if ($isReachableSingle) {
-                Write-Host "$target is reachable" @App
+                # --- INJEKSI LOGIKA MAC ADDRESS (SINGLE TARGET) ---
+                $showMacSingle = $false
+                if ($target -match '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)') {
+                    Write-Host " [*] Internal IP Detected ($target)." @Cha
+                    $ask = Read-Host " [*] Show MAC Address? (Y/N)"
+                    if ($ask -match '^[Yy]') { 
+                        $showMacSingle = $true 
+                        $mac = (Get-NetNeighbor -IPAddress $target -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
+                        if (-not $mac) { $mac = "N/A" }
+                    }
+                }
+
+                if ($showMacSingle) {
+                    Write-Host "$target is reachable [MAC: $mac]" @App
+                } else {
+                    Write-Host "$target is reachable" @App
+                }
+                # --------------------------------------------------
                 $reachableTargets[$target] = $true 
             }
             else {
