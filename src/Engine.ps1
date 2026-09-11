@@ -26,8 +26,9 @@ function helpEngine {
    .\src\index.ps1 -help
 
 2. Perform Discovery (without port scanning):
+   .\src\index.ps1 -targets "10.0.0.0/24" -discover
    .\src\index.ps1 -targets "example.com" -discover
-   .\src\index.ps1 -targets "example.com", "10.0.0.1" -discover
+   .\src\index.ps1 -targets "example.com", "8.8.8.8" -discover
 
 3. Perform Quick Scan (using default ports):
    .\src\index.ps1 -targets "example.com" -quickScan
