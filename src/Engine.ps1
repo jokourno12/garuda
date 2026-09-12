@@ -7,9 +7,6 @@
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Help.ps1'))"
 
-#Runtime
-. "$([System.IO.Path]::Combine($PSScriptRoot, 'Runtime', 'Windows.ps1'))"
-
 function showBanner {
     supportBanner
 }
