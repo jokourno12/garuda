@@ -1,5 +1,3 @@
-. "$([System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'Runtime', 'Windows.ps1'))"
-
 function scanner {
     param(
         [string[]]$targets,

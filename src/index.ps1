@@ -42,15 +42,14 @@ if ($quickScan) {
 Write-Information @"
    Debugging information
 -----------------------------
-pMin: $pMin
-pMax: $pMax
-quickScan: $($quickScan.IsPresent)
-Targets: $targets
-Ports: $ports
+pMin      : $pMin
+pMax      : $pMax
+quickScan : $($quickScan.IsPresent)
+Targets   : $($targets -join ', ')
+Ports     : $($ports -join ', ')
 -----------------------------
 "@
 
-# Memanggil function yang ada di Engine.ps1
 if ($discover) {
     discoverEngine -targets $targets
     return
@@ -73,3 +72,5 @@ if ($fullScan) {
     return
 }
 
+Write-Host "Error: No scan mode specified. Use -discover, -quickScan, or -fullScan." @Pen
+Write-Host "Run 'garuda -help' for usage information." @Cha

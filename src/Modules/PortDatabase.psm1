@@ -1,5 +1,3 @@
-. "$([System.IO.Path]::Combine($PSScriptRoot, '..', 'Runtime', 'Windows.ps1'))"
-
 function getWebPorts {
 
     $client = [System.Net.Http.HttpClient]::new()

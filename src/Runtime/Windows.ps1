@@ -1,18 +1,18 @@
 #GLOBAL THEMES
 $Pen = @{ ForegroundColor = 'Red' }
-# Kritis, Error, & Tindakan Destruktif (misal: Force Cleanup / Sesi Crash)
+# Critical, Error, & Destructive Actions (eg: Force Cleanup/Crash Session)
 
 $Net = @{ ForegroundColor = 'Blue' }
-# Informasi Umum & Penanda Langkah Awal / Header Proses
+# General Information & Early Step Markers/Process Headers
 
 $Inc = @{ ForegroundColor = 'Magenta' }
-# Status Khusus, Proses Background, atau Sub-sistem Tersembunyi
+# Special Status, Background Process, or Hidden Sub-system
 
 $App = @{ ForegroundColor = 'Green' }
-# Keberhasilan (Success) & Status Normal / Aman Berjalan
+# Success (Success) & Normal Status / Safe Running
 
 $Cha = @{ ForegroundColor = 'DarkYellow' }  
-# Peringatan (Warning) & Kondisi Kehati-hatian / Menunggu (Caution)
+# Warning (Warning) & Precautionary Conditions / Waiting (Caution)
 
 $Dim = @{ ForegroundColor = 'DarkGray' }
-# Detail Teknis, Instruksi Minor, & Teks Background (Tidak mendominasi visual)
+# Technical Details, Minor Instructions, & Background Text (Not dominating the visuals)
