@@ -27,8 +27,11 @@ function updatePortDatabase {
         getWebPorts
         getVersion
 
+        $garudaDataDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Garuda')
+        $PortListPath = [System.IO.Path]::Combine($garudaDataDir, 'ports.txt')
+
         if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
-            throw "Critical: getWebPorts failed to create or update $PortListPath"
+            throw "Critical: getWebPorts failed to create or update ports.txt at $PortListPath"
         }
 
         Write-Host "[+] File ports.txt successfully created or updated." @App
