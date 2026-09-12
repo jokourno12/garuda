@@ -1,12 +1,10 @@
 function getWebPorts {
 
     $client = [System.Net.Http.HttpClient]::new()
-    
     $client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     try {
         Write-Host "Downloading port database from IANA..." @Pen
-        
         $xmlString = $client.GetStringAsync("https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xml").Result
         
         if ([string]::IsNullOrWhiteSpace($xmlString)) {
@@ -18,12 +16,17 @@ function getWebPorts {
 
         $output = [System.Text.StringBuilder]::new()
         
-        $total = $LatestPorts.ChildNodes.record.Count
+        $records = @($LatestPorts.registry.record)
+        $total = $records.Count
         $current = 0
-        foreach ($record in $LatestPorts.ChildNodes.record){
+
+        foreach ($record in $records){
             $current++
-            $percentComplete = [math]::Round(($current / $total) * 100, 2)
-            Write-Progress -Activity "Processing records" -Status "Getting port descriptions from the web $percentComplete%" -PercentComplete $percentComplete
+
+            if ($total -gt 0) {
+                $percentComplete = [math]::Round(($current / $total) * 100, 2)
+                Write-Progress -Activity "Processing records" -Status "Getting port descriptions from the web $percentComplete%" -PercentComplete $percentComplete
+            }
             
             if ([string]::IsNullOrEmpty($record.number) -or ([string]::IsNullOrEmpty($record.protocol))) {
                 continue
@@ -74,14 +77,15 @@ function getVersion {
         $localVersion = [version]$localModule.ModuleVersion
 
         $stringContent = $client.GetStringAsync($remoteModuleUrl).Result
-        $remoteModuleContent = [PSCustomObject]@{ Content = $stringContent }
-        $ast = [System.Management.Automation.Language.Parser]::ParseInput($remoteModuleContent.Content, [ref]$null, [ref]$null)
-        $remoteModule = $ast.EndBlock.Statements[0].PipelineElements[0].Expression.Value
 
-        $remoteVersion = [version]$remoteModule.ModuleVersion
+        if ($stringContent -match "(?i)ModuleVersion\s*=\s*['`"]([\d\.]+)['`"]") {
+            $remoteVersion = [version]$matches[1]
 
-        if ($localVersion.Major -lt $remoteVersion.Major) {
-            Write-Host "A new version ($remoteVersion) is available. Please update your module." @Cha
+            if ($localVersion -lt $remoteVersion) {
+                Write-Host "A new version ($remoteVersion) is available. Please update your module." @Cha
+            }
+        } else {
+            Write-Verbose "Failed to parse ModuleVersion from the remote repository."
         }          
     }
     catch {
