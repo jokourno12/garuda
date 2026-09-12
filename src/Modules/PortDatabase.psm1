@@ -44,10 +44,15 @@ function getWebPorts {
         }
         Write-Progress -Activity "Processing records" -Status "Getting port descriptions from the web $percentComplete%" -Completed
 
-        $portsPath = [System.IO.Path]::Combine($PSScriptRoot, '..', 'Support', 'ports.txt')
-        
-        [System.IO.File]::WriteAllText($portsPath, $output.ToString())
-        Write-Verbose -Message "File created at $portsPath"
+        $garudaDataDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Garuda')
+        $PortListPath = [System.IO.Path]::Combine($garudaDataDir, 'ports.txt')
+
+        if (-not (Test-Path $garudaDataDir)) {
+            New-Item -ItemType Directory -Path $garudaDataDir -Force | Out-Null
+        }
+
+        [System.IO.File]::WriteAllText($PortListPath, $output.ToString())
+        Write-Verbose -Message "Database updated successfully at $PortListPath"
     }
     catch {
         Write-Error "Failed to process Web Ports data. Detail: $($_.Exception.Message)"
@@ -59,8 +64,8 @@ function getWebPorts {
 }
 
 function getVersion {
-    $localModulePath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'package.psd1')
-    $remoteModuleUrl = "https://raw.githubusercontent.com/jokourno12/garuda/main/package.psd1"
+    $localModulePath = [System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'garuda.psd1')
+    $remoteModuleUrl = "https://raw.githubusercontent.com/jokourno12/garuda/main/garuda.psd1"
 
     $client = [System.Net.Http.HttpClient]::new()
     
