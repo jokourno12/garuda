@@ -7,28 +7,29 @@ function scanner {
         [string[]]$ports
     )
 
-    # FASE 2: VALIDASI LAYER 7 (APPLICATION)
     function scannerApplication {
         param(
             [Parameter(Mandatory=$true)]
             [array]$OpenPorts
         )
 
-        $denoCmd = Get-Command deno -ErrorAction SilentlyContinue
+        $denoCmd = $null
+        if (Get-Command deno -ErrorAction SilentlyContinue) {
+            $denoCmd = "deno"
+        } elseif (Test-Path "$HOME/.deno/bin/deno") {
+            $denoCmd = "$HOME/.deno/bin/deno"
+        }
 
         if ($null -ne $denoCmd) {
             Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net
             
             $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js')
-            
-            # Menggunakan Temporary File untuk menjembatani data (Mencegah Deadlock Stdin)
             $tempFile = [System.IO.Path]::GetTempFileName()
             
             try {
-                $OpenPorts | ConvertTo-Json -Compress | Out-File -FilePath $tempFile -Encoding utf8
+                $OpenPorts | ConvertTo-Json -Depth 10 -Compress | Out-File -FilePath $tempFile -Encoding utf8
                 
-                # Eksekusi Deno dengan akses baca ke temp file
-                $denoOutput = & deno run --allow-net --allow-read $scriptPath $tempFile
+                $denoOutput = & $denoCmd run --allow-net --allow-read $scriptPath $tempFile
                 
                 if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
                     $l7Output = $denoOutput | ConvertFrom-Json
@@ -76,8 +77,12 @@ function scanner {
 
                         if ($port -in 443, 8443) {
                             $sslStream = [System.Net.Security.SslStream]::new($stream)
-                            $sslStream.AuthenticateAsClient($target)
-                            $activeStream = $sslStream
+                            $sslTask = $sslStream.AuthenticateAsClientAsync($target)
+                            if ($sslTask.Wait(1500)) {
+                                $activeStream = $sslStream
+                            } else {
+                                throw "SSL Handshake Timeout"
+                            }
                         }
 
                         if ($port -in 80, 8080, 443, 8443) {
@@ -128,8 +133,6 @@ function scanner {
         }
     }
 
-
-    # FASE 1: DISCOVERY LAYER 4 (TRANSPORT)
     function scannerTransport {
         if ($targets[0] -eq "") {
             Write-Host "You must specify at least one target with -targets.`nExiting now." @Pen
@@ -256,9 +259,5 @@ function scanner {
         }
     }
 
-    # =========================================================================
-    # EKSEKUSI ORCHESTRATOR
-    # Memulai rantai eksekusi dengan memanggil Layer 4
-    # =========================================================================
     scannerTransport
 }

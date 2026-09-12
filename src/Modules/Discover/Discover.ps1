@@ -7,7 +7,7 @@ function discover {
         [string[]]$targets
     )
 
-    $reachableTargets = [System.Collections.Concurrent.ConcurrentDictionary[string, bool]]::new()
+    $reachableTargets = [System.Collections.Concurrent.ConcurrentDictionary[string, string]]::new()
 
     foreach ($target in $targets) {
         if ($target -match "/") {
@@ -17,10 +17,10 @@ function discover {
             $ipRange | ForEach-Object -Parallel {
                 $ip = $_
                 $localResult = $using:reachableTargets
+                $method = "None"
 
                 Write-Progress -Activity "Checking if $ip is reachable"
 
-                $isReachable = $false
                 $pingSender = [System.Net.NetworkInformation.Ping]::new()
                 
                 try {
@@ -28,7 +28,7 @@ function discover {
                         $reply = $pingSender.Send($ip, 1000)
                         
                         if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
-                            $isReachable = $true
+                            $method = "ICMP"
                             break
                         }
                     }
@@ -40,16 +40,17 @@ function discover {
                     $pingSender.Dispose()
                 }
 
-                # --- INJEKSI LOGIKA LAYER 4 (TCP FALLBACK) ---
-                if (-not $isReachable) {
+                if ($method -eq "None") {
                     foreach ($port in @(443, 80)) {
-                        if ($isReachable) { break }
                         $tcpClient = [System.Net.Sockets.TcpClient]::new()
                         try {
                             $connectResult = $tcpClient.BeginConnect($ip, $port, $null, $null)
                             $success = $connectResult.AsyncWaitHandle.WaitOne(1000, $true)
+
                             if ($success -and $tcpClient.Connected) {
-                                $isReachable = $true
+                                $tcpClient.EndConnect($connectResult)
+                                $method = "TCP/$port"
+                                break
                             }
                         }
                         catch {}
@@ -59,26 +60,26 @@ function discover {
                         }
                     }
                 }
-                # ---------------------------------------------
 
-                if ($isReachable) {
-                    $localResult[$ip] = $true
-                }
-                else {
-                    $localResult[$ip] = $false
+                $localResult[$ip] = $method
+
+                if ($method -eq "None") {
                     Write-Verbose "$ip is not reachable"
                 }
             } -ThrottleLimit 15
 
             $reachableCount = 0
-
-            # --- INJEKSI LOGIKA MAC ADDRESS (SUBNET) ---
             $showMac = $false
-            # Cek apakah target adalah IP Privat (10.x, 172.16-31.x, 192.168.x)
+
             if ($target -match '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)') {
-                # Pastikan ada minimal 1 IP yang reachable agar tidak bertanya sia-sia
                 $hasReachable = $false
-                foreach ($key in $reachableTargets.Keys) { if ($reachableTargets[$key]) { $hasReachable = $true; break } }
+
+                foreach ($ip in $ipRange) { 
+                    if ($reachableTargets.ContainsKey($ip) -and $reachableTargets[$ip] -ne "None") { 
+                        $hasReachable = $true
+                        break 
+                    } 
+                }
                 
                 if ($hasReachable) {
                     Write-Host " [*] Internal IP Detected ($target)." @Cha
@@ -86,25 +87,24 @@ function discover {
                     if ($ask -match '^[Yy]') { $showMac = $true }
                 }
             }
-            # -------------------------------------------
 
             foreach ($ip in $ipRange | Sort-Object) {
-
-                if ($reachableTargets[$ip]) {
-                    # --- INJEKSI OUTPUT MAC ---
+                $detectedMethod = $reachableTargets[$ip]
+                
+                if ($detectedMethod -ne "None") {
+                    $macOutput = ""
                     if ($showMac) {
-                        $mac = (Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
-                        if (-not $mac) { $mac = "N/A" }
-                        Write-Host "$ip is reachable [MAC: $mac]" @App
+                        if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
+                            $mac = (Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
+                            if (-not $mac) { $mac = "N/A" }
+                        } else {
+                            $mac = "N/A (OS Not Supported)"
+                        }
+                        $macOutput = " [MAC: $mac]"
                     }
-                    else {
-                        Write-Host "$ip is reachable" @App
-                    }
-                    # --------------------------
+                    
+                    Write-Host "$ip is reachable via $detectedMethod$macOutput" @App
                     $reachableCount++
-                }
-                else {
-                    Write-Verbose "$ip is not reachable"
                 }
             }
 
@@ -117,37 +117,35 @@ function discover {
         }
         else {
 
-            $isReachableSingle = $false
+            $method = "None"
             $pingSingle = [System.Net.NetworkInformation.Ping]::new()
             
             try {
                 for ($i = 0; $i -lt 2; $i++) {
                     $reply = $pingSingle.Send($target, 1000)
                     if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
-                        $isReachableSingle = $true
+                        $method = "ICMP"
                         break
                     }
                 }
             }
-            catch { $isReachableSingle = $false }
+            catch { }
             finally { $pingSingle.Dispose() }
             
-            # --- INJEKSI LOGIKA LAYER 4 (TCP FALLBACK) ---
-            $method = "ICMP"
-            if (-not $isReachableSingle) {
-                # Memberikan informasi bahwa ICMP gagal dan lanjut ke Layer 4
+            if ($method -eq "None") {
                 Write-Host " [*] Layer ICMP possible blocked for $target." @Cha
                 Write-Host " [*] Attempting Layer 4 (TCP)..." @Inc
 
                 foreach ($port in @(443, 80)) {
-                    if ($isReachableSingle) { break }
                     $tcpClientSingle = [System.Net.Sockets.TcpClient]::new()
                     try {
                         $connectResult = $tcpClientSingle.BeginConnect($target, $port, $null, $null)
                         $success = $connectResult.AsyncWaitHandle.WaitOne(1000, $true)
                         if ($success -and $tcpClientSingle.Connected) {
-                            $isReachableSingle = $true
-                            $method = "TCP/$port" # Mencatat port yang berhasil
+                            # <--- PERUBAHAN 2: Menutup siklus Async untuk Single Target --->
+                            $tcpClientSingle.EndConnect($connectResult) 
+                            $method = "TCP/$port"
+                            break
                         }
                     }
                     catch {}
@@ -157,31 +155,30 @@ function discover {
                     }
                 }
             }
-            # ---------------------------------------------
 
-            if ($isReachableSingle) {
-                # --- INJEKSI LOGIKA MAC ADDRESS (SINGLE TARGET) ---
+            if ($method -ne "None") {
                 $showMacSingle = $false
                 if ($target -match '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)') {
                     Write-Host " [*] Internal IP Detected ($target)." @Cha
                     $ask = Read-Host " [*] Show MAC Address? (Y/N)"
                     if ($ask -match '^[Yy]') { 
                         $showMacSingle = $true 
-                        $mac = (Get-NetNeighbor -IPAddress $target -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
-                        if (-not $mac) { $mac = "N/A" }
+                        if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
+                            $mac = (Get-NetNeighbor -IPAddress $target -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
+                            if (-not $mac) { $mac = "N/A" }
+                        } else {
+                            $mac = "N/A (OS Not Supported)"
+                        }
                     }
                 }
 
-                if ($showMacSingle) {
-                    Write-Host "$target is reachable [MAC: $mac]" @App
-                } else {
-                    Write-Host "$target is reachable" @App
-                }
-                # --------------------------------------------------
-                $reachableTargets[$target] = $true 
+                $macOutput = if ($showMacSingle) { " [MAC: $mac]" } else { "" }
+                Write-Host "$target is reachable via $method$macOutput" @App
+                $reachableTargets[$target] = $method 
             }
             else {
                 Write-Host "$target is not reachable" @Cha
+                $reachableTargets[$target] = "None"
             }
         }
     }
@@ -191,8 +188,8 @@ function discover {
         Write-Host "`nReachable Hosts:" @Net
 
         foreach ($ip in $reachableTargets.Keys | Sort-Object) {
-            if ($reachableTargets[$ip]) {
-                Write-Host " - $ip"
+            if ($reachableTargets[$ip] -ne "None") {
+                Write-Host " - $ip ($($reachableTargets[$ip]))"
             }
         }
     }
