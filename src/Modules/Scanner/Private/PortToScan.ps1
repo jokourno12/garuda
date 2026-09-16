@@ -31,7 +31,7 @@ function portToScan {
             Write-Warning "[Garuda] QuickScan configuration file not found in: $ConfigPath"
         }
     }
-    elseif ($null -ne $Ports -and $Ports.Count -gt 0) {
+    elseif ($null -ne $Ports -and $Ports.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Ports[0])) {
         $portsToScan = [int[]]$ports
     }
     else {
