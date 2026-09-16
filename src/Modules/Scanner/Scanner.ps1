@@ -27,12 +27,12 @@ function scanner {
             $tempFile = [System.IO.Path]::GetTempFileName()
             
             try {
-                $OpenPorts | ConvertTo-Json -Depth 10 -Compress | Out-File -FilePath $tempFile -Encoding utf8
+                ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath $tempFile -Encoding utf8
                 
-                $denoOutput = & $denoCmd run --allow-net --allow-read $scriptPath $tempFile
+                $denoOutput = (& $denoCmd run --quiet --allow-net --allow-read $scriptPath $tempFile) -join ""
                 
                 if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
-                    $l7Output = $denoOutput | ConvertFrom-Json
+                    $l7Output = @($denoOutput | ConvertFrom-Json)
                     
                     if ($null -ne $l7Output -and $l7Output.Count -gt 0) {
                         $l7Output | Sort-Object Host, Port | Format-Table -AutoSize
