@@ -161,7 +161,7 @@ function scanner {
 
             . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))"
             
-            $portsToScan = portToScan
+            $portsToScan = portToScan -QuickScan:$quickScan -Ports $ports -PMin $pMin -PMax $pMax
             $totalPorts = $portsToScan.Count
 
             if ($totalPorts -gt 0) {
