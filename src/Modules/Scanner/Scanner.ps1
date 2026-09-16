@@ -161,7 +161,7 @@ function scanner {
 
             . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))"
             
-            $portsToScan = portToScan
+            $portsToScan = portToScan -QuickScan:$quickScan -Ports $ports -PMin $pMin -PMax $pMax
             $totalPorts = $portsToScan.Count
 
             if ($totalPorts -gt 0) {
@@ -188,15 +188,15 @@ function scanner {
                     )
 
                     $obj.NoDelay = $true
-                    $obj.SendTimeout = 100
-                    $obj.ReceiveTimeout = 100
+                    $obj.SendTimeout = ($TargetIP -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^127\.') ? 100 : 500
+                    $obj.ReceiveTimeout = $obj.SendTimeout
 
                     $ip = [System.Net.IPAddress]::Parse($TargetIP)
                     $endpoint = [System.Net.IPEndPoint]::new($ip, $port)
                     
                     try {
                         $connect = $obj.BeginConnect($endpoint, $null, $null)
-                        $Wait = $connect.AsyncWaitHandle.WaitOne(100, $false)
+                        $Wait = $connect.AsyncWaitHandle.WaitOne($obj.SendTimeout, $false)
 
                         if (-not $Wait) {
                             Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose

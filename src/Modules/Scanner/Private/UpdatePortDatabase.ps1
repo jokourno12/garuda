@@ -1,6 +1,7 @@
-. "$([System.IO.Path]::Combine($PSScriptRoot, '..', '..', '..', 'Runtime', 'Windows.ps1'))"
-
 function updatePortDatabase {
+    $garudaDataDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Garuda')
+    $PortListPath  = [System.IO.Path]::Combine($garudaDataDir, 'ports.txt')
+    
     $needsUpdate = $true
 
     if (Test-Path -Path $PortListPath -PathType Leaf) {
@@ -8,7 +9,7 @@ function updatePortDatabase {
         
         if ($fileInfo.CreationTime -gt (Get-Date).AddDays(-28)) {
             Write-Verbose -Message "Read ports.txt and fill hash table..."
-            $portsHashTable = populatePortsHash
+            $portsHashTable = populatePortsHash -PortListPath $PortListPath
             $needsUpdate = $false
         } else {
             Write-Host "File ports.txt outdated (>28 days). Updating data..." @Cha
@@ -27,15 +28,12 @@ function updatePortDatabase {
         getWebPorts
         getVersion
 
-        $garudaDataDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Garuda')
-        $PortListPath = [System.IO.Path]::Combine($garudaDataDir, 'ports.txt')
-
         if (-not (Test-Path -Path $PortListPath -PathType Leaf)) {
             throw "Critical: getWebPorts failed to create or update ports.txt at $PortListPath"
         }
 
         Write-Host "[+] File ports.txt successfully created or updated." @App
-        $portsHashTable = populatePortsHash
+        $portsHashTable = populatePortsHash -PortListPath $PortListPath
     }
 
     return $portsHashTable
