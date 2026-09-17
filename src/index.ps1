@@ -56,19 +56,12 @@ if ($discover) {
 }
 
 if ($quickScan) {
-    quickScanEngine `
-        -targets $targets `
-        -quickScan:$true
+    quickScanEngine -targets $targets
     return
 }
 
 if ($fullScan) {
-    fullScanEngine `
-        -targets $targets `
-        -quickScan:$false `
-        -pMin $pMin `
-        -pMax $pMax `
-        -ports $ports
+    fullScanEngine -targets $targets -pMin $pMin -pMax $pMax -ports $ports
     return
 }
 
