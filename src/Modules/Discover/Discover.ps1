@@ -66,7 +66,7 @@ function discover {
                 if ($method -eq "None") {
                     Write-Verbose "$ip is not reachable"
                 }
-            } -ThrottleLimit 15
+            } @ThrottleCreat
 
             $reachableCount = 0
             $showMac = $false
