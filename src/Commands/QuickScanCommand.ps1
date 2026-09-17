@@ -3,11 +3,9 @@
 function quickScanCommand {
 [CmdletBinding()]
 param(
-        [string[]]$targets,
-        [switch]$quickScan
+        [Parameter(Mandatory = $true)]
+        [string[]]$targets
     )
 
-    scanner `
-        -targets $targets `
-        -quickScan:$quickScan
+    scanner -targets $targets -quickScan
 }

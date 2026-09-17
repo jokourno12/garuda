@@ -28,29 +28,21 @@ function discoverEngine {
 function quickScanEngine {
 	[CmdletBinding()]
 	param(
-            [string[]]$targets,
-            [switch]$quickScan
+            [Parameter(Mandatory = $true)]
+            [string[]]$targets
     )
 
-    quickScanCommand `
-        -targets $targets `
-        -quickScan:$quickScan
+    quickScanCommand -targets $targets
 }
 
 function fullScanEngine {
-	[CmdletBinding()]
-	param(
+    [CmdletBinding()]
+    param(
         [string[]]$targets,
-        [switch]$quickScan,
         [int]$pMin,
         [int]$pMax,
         [string[]]$ports
     )
 
-    fullScanCommand `
-        -targets $targets `
-        -quickScan:$quickScan `
-        -pMin $pMin `
-        -pMax $pMax `
-        -ports $ports
+    fullScanCommand -targets $targets -pMin $pMin -pMax $pMax -ports $ports
 }
