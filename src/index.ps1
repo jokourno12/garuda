@@ -15,7 +15,7 @@ param(
 	[string[]]$ports
 )
 
-. "$([System.IO.Path]::Combine($PSScriptRoot, 'Runtime', 'Windows.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Runtime', 'Themes.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Engine.ps1'))"
 
 showBanner

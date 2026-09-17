@@ -121,7 +121,7 @@ function scanner {
                 }
                 $localResult = $using:l7Result
                 $localResult[$key] = $r
-            } -ThrottleLimit 15
+            } @ThrottleCreat
 
             $validL7 = $l7Result.Values | Where-Object { $_.L7_Banner -ne "No Banner / Timeout" }
 
@@ -236,7 +236,7 @@ function scanner {
                         $obj.Close()
                         $obj.Dispose()
                     }
-                } -ThrottleLimit 15
+                } @ThrottleCreat
             }
         }
 

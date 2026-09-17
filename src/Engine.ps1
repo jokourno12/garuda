@@ -1,9 +1,9 @@
-#Commands
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Runtime', 'Threads.ps1'))"
+
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'DiscoverCommand.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'QuickScanCommand.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'FullScanCommand.ps1'))"
 
-#Support
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Help.ps1'))"
 
