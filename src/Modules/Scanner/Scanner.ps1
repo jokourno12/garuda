@@ -256,6 +256,12 @@ function scanner {
             }
         } else {
             Write-Host "`nNo open ports were found for Layer 7 validation." @Cha
+            Write-Host "[*] Possible reasons for empty results:" @Dim
+            Write-Host " 1. Target Firewall/WAF/IPS packet drop." @Dim
+            Write-Host " 2. Network latency exceeded timeout limit." @Dim
+            Write-Host " 3. Local gateway NAT buffer overflow." @Dim
+            Write-Host " 4. Outbound traffic rate-limited by ISP." @Dim
+            Write-Host " 5. Local socket or thread exhaustion." @Dim
         }
     }
 
