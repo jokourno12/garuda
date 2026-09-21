@@ -24,7 +24,12 @@ class HostResult {
         return $this.Protocol
     }
 
-    [void] InferClassification() {
+    [void] InferClassification([bool]$isLocalHost) {
+        if ($isLocalHost) {
+            $this.InferredClassification = "Local Host (This Device)"
+            return
+        }
+
         $localTtl = $this.TTL
         $localIp = $this.IPAddress
         

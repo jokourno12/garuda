@@ -17,6 +17,16 @@ function hostResultTable {
     Write-Host " $headerStr" @App
     Write-Host " $("-" * $headerStr.Length)" @Dim
 
+    $sortedResults = $Results | Sort-Object { 
+        if ($_.IPAddress -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { 
+            [version]$_.IPAddress 
+        } 
+
+        else { 
+            $_.IPAddress 
+        } 
+    }
+
     foreach ($item in $Results) {
         if ($item.IsReachable) {
             $colIP    = $item.IPAddress.PadRight(16)

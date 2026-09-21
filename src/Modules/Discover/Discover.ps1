@@ -7,6 +7,8 @@ function discover {
         [string[]]$targets
     )
 
+    $localIPs = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+
     $hostResults = [System.Collections.ArrayList]::new()
     $showMac = $false
     $runClassification = $false
@@ -93,7 +95,8 @@ function discover {
                     }
                     
                     if ($runClassification) {
-                        $dto.InferClassification()
+                        $isLocal = $localIPs -contains $ip
+                        $dto.InferClassification($isLocal)
                     }
 
                     [void]$hostResults.Add($dto)
@@ -170,7 +173,8 @@ function discover {
                 }
 
                 if ($runClassification) {
-                    $dto.InferClassification()
+                    $isLocal = $localIPs -contains $target
+                    $dto.InferClassification($isLocal)
                 }
 
                 [void]$hostResults.Add($dto)
