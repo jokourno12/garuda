@@ -6,6 +6,8 @@
 
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Help.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Dto', 'HostResult.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Dto', 'HostResultTable.ps1'))"
 
 function showBanner {
     supportBanner
