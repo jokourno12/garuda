@@ -13,270 +13,272 @@ function scanner {
             [array]$OpenPorts
         )
 
-        $denoCmd = $null;
+        $denoCmd = $null
         if (Get-Command deno -ErrorAction SilentlyContinue) {
-            $denoCmd = "deno";
+            $denoCmd = "deno"
         } elseif (Test-Path "$HOME/.deno/bin/deno") {
-            $denoCmd = "$HOME/.deno/bin/deno";
+            $denoCmd = "$HOME/.deno/bin/deno"
         }
 
         if ($null -ne $denoCmd) {
-            Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net;
+            Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net
             
-            $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js');
-            $tempFile = [System.IO.Path]::GetTempFileName();
+            $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js')
+            $tempFile = [System.IO.Path]::GetTempFileName()
             
             try {
-                ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath$tempFile -Encoding utf8;
+                ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath$tempFile -Encoding utf8
                 
-                $denoOutput = (&$denoCmd run --quiet --allow-net --allow-read $scriptPath$tempFile) -join "";
+                $denoOutput = (&$denoCmd run --quiet --allow-net --allow-read $scriptPath$tempFile) -join ""
                 
                 if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
-                    $l7Output = @($denoOutput | ConvertFrom-Json);
+                    $l7Output = @($denoOutput | ConvertFrom-Json)
                     
                     if ($null -ne$l7Output -and $l7Output.Count -gt 0) {$l7Output | ForEach-Object {
-                            $dto = [HostResult]::new($_.Host);
-                            $dto.Port =$_.Port;
-                            $dto.Service =$_.L4_Service;
-                            $dto.L7Banner =$_.L7_Banner;
-                            $dto;
-                        } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize;
+                            $dto = [HostResult]::new($_.Host)
+                            $dto.Port =$_.Port
+                            $dto.Service =$_.L4_Service
+                            $dto.L7Banner =$_.L7_Banner
+                            $dto
+                        } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
                     } else {
-                        Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha;
+                        Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
                     }
                 } else {
-                    Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha;
+                    Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
                 }
             } catch {
-                Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen;
+                Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen
             } finally {
-                if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force; }
+                if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force}
             }
         } else {
-            Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha;
-            Write-Host "Starting native PowerShell Layer 7 scanning on $($OpenPorts.Count) open port..." @Net;
+            Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha
+            Write-Host "Starting native PowerShell Layer 7 scanning on $($OpenPorts.Count) open port..." @Net
 
-            $l7Result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new();
+            $l7Result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new()
 
             $OpenPorts | ForEach-Object -Parallel {
-                $item =$_;
-                $target =$item.Host;
-                $port =$item.Port;
-                $key = $target + ":" + $port;
-                $banner = "No Banner / Timeout";
+                $item =$_
+                $target =$item.Host
+                $port =$item.Port
+                $key = $target + ":" + $port
+                $banner = "No Banner / Timeout"
 
                 try {
-                    $tcpClient = [System.Net.Sockets.TcpClient]::new();
-                    $connect = $tcpClient.BeginConnect($target, $port,$null, $null);
-                    $wait = $connect.AsyncWaitHandle.WaitOne(1000,$false);
+                    $tcpClient = [System.Net.Sockets.TcpClient]::new()
+                    $connect = $tcpClient.BeginConnect($target, $port,$null, $null)
+                    $wait = $connect.AsyncWaitHandle.WaitOne(1000,$false)
 
                     if ($wait -and $tcpClient.Connected) {
-                        $tcpClient.EndConnect($connect);
-                        $stream = $tcpClient.GetStream();
-                        $stream.ReadTimeout = 2000;
-                        $stream.WriteTimeout = 2000;
+                        $tcpClient.EndConnect($connect)
+                        $stream = $tcpClient.GetStream()
+                        $stream.ReadTimeout = 2000
+                        $stream.WriteTimeout = 2000
                         
-                        $activeStream =$stream;
+                        $activeStream =$stream
 
                         if ($port -in 443, 8443) {
-                            $sslStream = [System.Net.Security.SslStream]::new($stream);
-                            $sslTask = $sslStream.AuthenticateAsClientAsync($target);
+                            $sslStream = [System.Net.Security.SslStream]::new($stream)
+                            $sslTask = $sslStream.AuthenticateAsClientAsync($target)
                             if ($sslTask.Wait(1500)) {
-                                $activeStream =$sslStream;
+                                $activeStream =$sslStream
                             } else {
-                                throw "SSL Handshake Timeout";
+                                throw "SSL Handshake Timeout"
                             }
                         }
 
                         if ($port -in 80, 8080, 443, 8443) {
-                            $writer = [System.IO.StreamWriter]::new($activeStream);
-                            $writer.WriteLine("HEAD / HTTP/1.1");
-                            $writer.WriteLine("Host: $target");
-                            $writer.WriteLine("Connection: close");
-                            $writer.WriteLine("");
-                            $writer.Flush();
+                            $writer = [System.IO.StreamWriter]::new($activeStream)
+                            $writer.WriteLine("HEAD / HTTP/1.1")
+                            $writer.WriteLine("Host: $target")
+                            $writer.WriteLine("Connection: close")
+                            $writer.WriteLine("")
+                            $writer.Flush()
                         }
 
-                        $reader = [System.IO.StreamReader]::new($activeStream);
-                        $readTask =$reader.ReadLineAsync();
+                        $reader = [System.IO.StreamReader]::new($activeStream)
+                        $readTask =$reader.ReadLineAsync()
                         
                         if ($readTask.Wait(2000)) {
-                            $bannerData =$readTask.Result;
+                            $bannerData =$readTask.Result
                             if (-not [string]::IsNullOrWhiteSpace($bannerData)) {
-                                $banner =$bannerData.Trim();
+                                $banner =$bannerData.Trim()
                             }
                         }
                     }
                 } catch {
-                    $banner = "Error: $($_.Exception.Message)";
+                    $banner = "Error: $($_.Exception.Message)"
                 } finally {
                     if ($null -ne$tcpClient) {
-                        $tcpClient.Close();$tcpClient.Dispose();
+                        $tcpClient.Close()
+                        $tcpClient.Dispose()
                     }
                 }
 
                 $r = [PSCustomObject]@{
-                    Host = $target;
-                    Port = $port;
-                    L4_Service = $item.L4_Service;
-                    L7_Banner = $banner;
-                };
-                $localResult =$using:l7Result;
-                $localResult[$key] =$r;
+                    Host = $target
+                    Port = $port
+                    L4_Service = $item.L4_Service
+                    L7_Banner = $banner
+                }
+                $localResult =$using:l7Result
+                $localResult[$key] =$r
             } @ThrottleCreat
 
-            $validL7 = $l7Result.Values | Where-Object {$_.L7_Banner -ne "No Banner / Timeout" };
+            $validL7 = $l7Result.Values | Where-Object {$_.L7_Banner -ne "No Banner / Timeout" }
 
             if ($validL7.Count -gt 0) {
                 $validL7 | ForEach-Object {
-                    $dto = [HostResult]::new($_.Host);
-                    $dto.Port =$_.Port;
-                    $dto.Service =$_.L4_Service;
-                    $dto.L7Banner =$_.L7_Banner;
-                    $dto;
-                } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize;
+                    $dto = [HostResult]::new($_.Host)
+                    $dto.Port =$_.Port
+                    $dto.Service =$_.L4_Service
+                    $dto.L7Banner =$_.L7_Banner
+                    $dto
+                } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
             } else {
-                Write-Host "`nNo service returns a banner at Layer 7." @Cha;
+                Write-Host "`nNo service returns a banner at Layer 7." @Cha
             }
         }
     }
 
     function scannerTransport {
         if ($targets[0] -eq "") {
-            Write-Host "You must specify at least one target with -targets.`nExiting now." @Pen;
-            return;
+            Write-Host "You must specify at least one target with -targets.`nExiting now." @Pen
+            return
         }
 
-        $garudaDataDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Garuda');
-        $PortListPath = [System.IO.Path]::Combine($garudaDataDir, 'ports.txt');
+        $garudaDataDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Garuda')
+        $PortListPath = [System.IO.Path]::Combine($garudaDataDir, 'ports.txt')
 
-        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PopulatePortsHash.ps1')))";
-        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'UpdatePortDatabase.ps1')))";
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PopulatePortsHash.ps1')))"
+        . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'UpdatePortDatabase.ps1')))"
 
-        $portsHashTable = updatePortDatabase;
+        $portsHashTable = updatePortDatabase
 
-        $result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new(); 
+        $result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new() 
 
         foreach ($target in $targets) {
             try {
-                $resolvedIP = [System.Net.Dns]::GetHostAddresses($target)[0];
-                $TargetIP =$resolvedIP.IPAddressToString;
-                $TargetFamily =$resolvedIP.AddressFamily;
+                $resolvedIP = [System.Net.Dns]::GetHostAddresses($target)[0]
+                $TargetIP =$resolvedIP.IPAddressToString
+                $TargetFamily =$resolvedIP.AddressFamily
             } catch {
-                Write-Warning "Failed to find IP for host: $target. Skipping this target...";
-                continue;
+                Write-Warning "Failed to find IP for host: $target. Skipping this target..."
+                continue
             }
 
-            . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))";
+            . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))"
             
-            $portsToScan = portToScan -QuickScan:$quickScan -Ports $ports -PMin $pMin -PMax $pMax;
-            $totalPorts =$portsToScan.Count;
+            $portsToScan = portToScan -QuickScan:$quickScan -Ports $ports -PMin $pMin -PMax $pMax
+            $totalPorts =$portsToScan.Count
 
             if ($totalPorts -gt 0) {                 0..($totalPorts - 1) | ForEach-Object -Parallel {
-                    $index =$_;
-                    $portsToScan =$using:portsToScan;
-                    $port = $portsToScan[$index];
+                    $index =$_
+                    $portsToScan =$using:portsToScan
+                    $port = $portsToScan[$index]
                     
-                    $Target =$using:target;
-                    $TargetIP =$using:TargetIP;
-                    $TargetFamily =$using:TargetFamily;
-                    $portsHashTable =$using:portsHashTable;
-                    $portInt = [Int]$port;
-                    $localResult =$using:result;
-                    $totalPorts =$using:totalPorts;
+                    $Target =$using:target
+                    $TargetIP =$using:TargetIP
+                    $TargetFamily =$using:TargetFamily
+                    $portsHashTable =$using:portsHashTable
+                    $portInt = [Int]$port
+                    $localResult =$using:result
+                    $totalPorts =$using:totalPorts
 
-                    $completed = (($index + 1) /$totalPorts) * 100;
-                    Write-Progress -Activity "Scanning ${Target}:$port" -Status "$([math]::Round($completed, 2))% complete" -PercentComplete $completed;
+                    $completed = (($index + 1) /$totalPorts) * 100
+                    Write-Progress -Activity "Scanning ${Target}:$port" -Status "$([math]::Round($completed, 2))% complete" -PercentComplete $completed
 
                     $obj = [System.Net.Sockets.Socket]::new($TargetFamily, 
                         [System.Net.Sockets.SocketType]::Stream, 
                         [System.Net.Sockets.ProtocolType]::Tcp
-                    );
+                    )
 
-                    $obj.NoDelay =$true;
-                    $obj.SendTimeout = ($TargetIP -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^127\.') ? 100 : 500;
-                    $obj.ReceiveTimeout =$obj.SendTimeout;
+                    $obj.NoDelay =$true
+                    $obj.SendTimeout = ($TargetIP -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^127\.') ? 100 : 500
+                    $obj.ReceiveTimeout =$obj.SendTimeout
 
-                    $ip = [System.Net.IPAddress]::Parse($TargetIP);
-                    $endpoint = [System.Net.IPEndPoint]::new($ip,$port);
+                    $ip = [System.Net.IPAddress]::Parse($TargetIP)
+                    $endpoint = [System.Net.IPEndPoint]::new($ip,$port)
                     
                     try {
-                        $connect = $obj.BeginConnect($endpoint, $null,$null);
-                        $Wait = $connect.AsyncWaitHandle.WaitOne($obj.SendTimeout, $false);
+                        $connect = $obj.BeginConnect($endpoint, $null,$null)
+                        $Wait = $connect.AsyncWaitHandle.WaitOne($obj.SendTimeout, $false)
 
                         if (-not $Wait) {
-                            Write-Verbose -Message "$Target 'port'$port 'Closed - Timeout'" -Verbose;
+                            Write-Verbose -Message "$Target 'port'$port 'Closed - Timeout'" -Verbose
                         }
                         else {
                             if ($obj.Connected) {
-                                $obj.EndConnect($connect);
+                                $obj.EndConnect($connect)
 
-                                $value = "Open";
-                                Write-Verbose -Message "$Target 'port'$port Open'" -Verbose;
+                                $value = "Open"
+                                Write-Verbose -Message "$Target 'port'$port Open'" -Verbose
 
                                 if ($portsHashTable.ContainsKey($portInt)) {
-                                    $Service = $portsHashTable[$portInt].Split('|');
+                                    $Service = $portsHashTable[$portInt].Split('|')
                                 }
                                 else {
-                                    $Service = @("Unknown", "Unknown");
+                                    $Service = @("Unknown", "Unknown")
                                 }
 
                                 $r = [PSCustomObject]@{
-                                    Host = $Target;
-                                    Port = $port;
-                                    State = $value;
-                                    L4_Service = $Service[0];
-                                    "IANA Standard Description" = $Service[1];
-                                };
+                                    Host = $Target
+                                    Port = $port
+                                    State = $value
+                                    L4_Service = $Service[0]
+                                    "IANA Standard Description" = $Service[1]
+                                }
 
-                                $key = $Target + ":" + $port;
-                                $localResult[$key] =$r;
+                                $key = $Target + ":" + $port
+                                $localResult[$key] =$r
                             }
                             else {
-                                Write-Verbose -Message "$Target 'port'$port 'Closed - Refused'" -Verbose;
+                                Write-Verbose -Message "$Target 'port'$port 'Closed - Refused'" -Verbose
                             }
                         }
                     } catch {
-                        Write-Verbose -Message "$Target 'port'$port 'Error: $($_.Exception.Message)'" -Verbose;
+                        Write-Verbose -Message "$Target 'port'$port 'Error: $($_.Exception.Message)'" -Verbose
                     } finally {
-                        $obj.Close();$obj.Dispose();
+                        $obj.Close()
+                        $obj.Dispose()
                     }
                 } @ThrottleCreat
             }
         }
 
-        Write-Host "`n[+] Layer 4 Scan Results:" @App;
+        Write-Host "`n[+] Layer 4 Scan Results:" @App
         
         $result.Values | ForEach-Object {
-            $dto = [HostResult]::new($_.Host);
-            $dto.Port = $_.Port;
-            $dto.State = $_.State;
-            $dto.Service = $_.L4_Service;
-            $dto.IANADescription = $_."IANA Standard Description";
-            $dto;
-        } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, State, Service, IANADescription | Format-Table -AutoSize;
+            $dto = [HostResult]::new($_.Host)
+            $dto.Port = $_.Port
+            $dto.State = $_.State
+            $dto.Service = $_.L4_Service
+            $dto.IANADescription = $_."IANA Standard Description"
+            $dto
+        } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, State, Service, IANADescription | Format-Table -AutoSize
 
-        $phase1Data = $result.Values | Sort-Object host, port; 
-        $openPorts = $phase1Data | Where-Object { $_.State -eq "Open" };
+        $phase1Data = $result.Values | Sort-Object host, port 
+        $openPorts = $phase1Data | Where-Object { $_.State -eq "Open" }
 
         if ($openPorts.Count -gt 0) {
-            Write-Host "";
-            $answer = Read-Host "There are $($openPorts.Count) open ports. Proceed with Layer 7 validation? (y/n)";
+            Write-Host ""
+            $answer = Read-Host "There are $($openPorts.Count) open ports. Proceed with Layer 7 validation? (y/n)"
             if ($answer -match "^y") {
-                scannerApplication -OpenPorts $openPorts;
+                scannerApplication -OpenPorts $openPorts
             } else {
-                Write-Host "Scanning stopped at Layer 4.";
+                Write-Host "Scanning stopped at Layer 4."
             }
         } else {
-            Write-Host "`nNo open ports were found for Layer 7 validation." @Cha;
-            Write-Host "[*] Possible reasons for empty results:" @Dim;
-            Write-Host " 1. Target Firewall/WAF/IPS packet drop." @Dim;
-            Write-Host " 2. Network latency exceeded timeout limit." @Dim;
-            Write-Host " 3. Local gateway NAT buffer overflow." @Dim;
-            Write-Host " 4. Outbound traffic rate-limited by ISP." @Dim;
-            Write-Host " 5. Local socket or thread exhaustion." @Dim;
+            Write-Host "`nNo open ports were found for Layer 7 validation." @Cha
+            Write-Host "[*] Possible reasons for empty results:" @Dim
+            Write-Host " 1. Target Firewall/WAF/IPS packet drop." @Dim
+            Write-Host " 2. Network latency exceeded timeout limit." @Dim
+            Write-Host " 3. Local gateway NAT buffer overflow." @Dim
+            Write-Host " 4. Outbound traffic rate-limited by ISP." @Dim
+            Write-Host " 5. Local socket or thread exhaustion." @Dim
         }
     }
 
-    scannerTransport;
+    scannerTransport
 }
