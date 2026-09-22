@@ -9,7 +9,7 @@ function scanner {
 
     function scannerApplication {
         param(
-            [Parameter(Mandatory = $true)]
+            [Parameter(Mandatory=$true)]
             [array]$OpenPorts
         )
 
@@ -36,9 +36,9 @@ function scanner {
                     
                     if ($null -ne $l7Output -and $l7Output.Count -gt 0) {$l7Output | ForEach-Object {
                             $dto = [HostResult]::new($_.Host)
-                            $dto.Port =$_.Port
-                            $dto.Service =$_.L4_Service
-                            $dto.L7Banner =$_.L7_Banner
+                            $dto.Port = $_.Port
+                            $dto.Service = $_.L4_Service
+                            $dto.L7Banner = $_.L7_Banner
                             $dto
                         } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
                     } else {
@@ -59,9 +59,9 @@ function scanner {
             $l7Result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new()
 
             $OpenPorts | ForEach-Object -Parallel {
-                $item =$_
-                $target =$item.Host
-                $port =$item.Port
+                $item = $_
+                $target = $item.Host
+                $port = $item.Port
                 $key = $target + ":" + $port
                 $banner = "No Banner / Timeout"
 
@@ -76,13 +76,13 @@ function scanner {
                         $stream.ReadTimeout = 2000
                         $stream.WriteTimeout = 2000
                         
-                        $activeStream =$stream
+                        $activeStream = $stream
 
                         if ($port -in 443, 8443) {
                             $sslStream = [System.Net.Security.SslStream]::new($stream)
                             $sslTask = $sslStream.AuthenticateAsClientAsync($target)
                             if ($sslTask.Wait(1500)) {
-                                $activeStream =$sslStream
+                                $activeStream = $sslStream
                             } else {
                                 throw "SSL Handshake Timeout"
                             }
@@ -131,9 +131,9 @@ function scanner {
             if ($validL7.Count -gt 0) {
                 $validL7 | ForEach-Object {
                     $dto = [HostResult]::new($_.Host)
-                    $dto.Port =$_.Port
-                    $dto.Service =$_.L4_Service
-                    $dto.L7Banner =$_.L7_Banner
+                    $dto.Port = $_.Port
+                    $dto.Service = $_.L4_Service
+                    $dto.L7Banner = $_.L7_Banner
                     $dto
                 } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
             } else {
@@ -171,9 +171,10 @@ function scanner {
             . "$([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'PortToScan.ps1')))"
             
             $portsToScan = portToScan -QuickScan:$quickScan -Ports $ports -PMin $pMin -PMax $pMax
-            $totalPorts =$portsToScan.Count
+            $totalPorts = $portsToScan.Count
 
-            if ($totalPorts -gt 0) {                 0..($totalPorts - 1) | ForEach-Object -Parallel {
+            if ($totalPorts -gt 0) {
+                0..($totalPorts - 1) | ForEach-Object -Parallel {
                     $index = $_
                     $portsToScan = $using:portsToScan
                     $port = $portsToScan[$index]
@@ -186,7 +187,7 @@ function scanner {
                     $localResult = $using:result
                     $totalPorts = $using:totalPorts
 
-                    $completed = (($index + 1) /$totalPorts) * 100
+                    $completed = (($index + 1) / $totalPorts) * 100
                     Write-Progress -Activity "Scanning ${Target}:$port" -Status "$([math]::Round($completed, 2))% complete" -PercentComplete $completed
 
                     $obj = [System.Net.Sockets.Socket]::new(
@@ -197,7 +198,7 @@ function scanner {
 
                     $obj.NoDelay = $true
                     $obj.SendTimeout = ($TargetIP -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^127\.') ? 100 : 500
-                    $obj.ReceiveTimeout =$obj.SendTimeout
+                    $obj.ReceiveTimeout = $obj.SendTimeout
 
                     $ip = [System.Net.IPAddress]::Parse($TargetIP)
                     $endpoint = [System.Net.IPEndPoint]::new($ip, $port)
