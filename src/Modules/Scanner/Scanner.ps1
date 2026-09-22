@@ -34,7 +34,8 @@ function scanner {
                 if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
                     $l7Output = @($denoOutput | ConvertFrom-Json)
                     
-                    if ($null -ne $l7Output -and $l7Output.Count -gt 0) {$l7Output | ForEach-Object {
+                    if ($null -ne $l7Output -and $l7Output.Count -gt 0) {
+                        $l7Output | ForEach-Object {
                             $dto = [HostResult]::new($_.Host)
                             $dto.Port = $_.Port
                             $dto.Service = $_.L4_Service
