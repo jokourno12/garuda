@@ -35,7 +35,13 @@ function scanner {
                     $l7Output = @($denoOutput | ConvertFrom-Json)
                     
                     if ($null -ne $l7Output -and $l7Output.Count -gt 0) {
-                        $l7Output | Sort-Object Host, Port | Format-Table -AutoSize
+                        $l7Output | ForEach-Object {
+                            $dto = [HostResult]::new($_.Host)
+                            $dto.Port = $_.Port
+                            $dto.Service = $_.L4_Service
+                            $dto.L7Banner = $_.L7_Banner
+                            $dto
+                        } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
                     } else {
                         Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
                     }
@@ -58,7 +64,6 @@ function scanner {
                 $target = $item.Host
                 $port = $item.Port
                 $key = $target + ":" + $port
-                
                 $banner = "No Banner / Timeout"
 
                 try {
@@ -68,9 +73,8 @@ function scanner {
 
                     if ($wait -and $tcpClient.Connected) {
                         $tcpClient.EndConnect($connect)
-                        
                         $stream = $tcpClient.GetStream()
-                        $stream.ReadTimeout = 2000 
+                        $stream.ReadTimeout = 2000
                         $stream.WriteTimeout = 2000
                         
                         $activeStream = $stream
@@ -116,7 +120,7 @@ function scanner {
                 $r = [PSCustomObject]@{
                     Host = $target
                     Port = $port
-                    L4_Service = $item.Service
+                    L4_Service = $item.L4_Service
                     L7_Banner = $banner
                 }
                 $localResult = $using:l7Result
@@ -126,7 +130,13 @@ function scanner {
             $validL7 = $l7Result.Values | Where-Object { $_.L7_Banner -ne "No Banner / Timeout" }
 
             if ($validL7.Count -gt 0) {
-                $validL7 | Sort-Object Host, Port | Format-Table -AutoSize
+                $validL7 | ForEach-Object {
+                    $dto = [HostResult]::new($_.Host)
+                    $dto.Port = $_.Port
+                    $dto.Service = $_.L4_Service
+                    $dto.L7Banner = $_.L7_Banner
+                    $dto
+                } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
             } else {
                 Write-Host "`nNo service returns a banner at Layer 7." @Cha
             }
@@ -174,7 +184,7 @@ function scanner {
                     $TargetIP = $using:TargetIP
                     $TargetFamily = $using:TargetFamily
                     $portsHashTable = $using:portsHashTable
-                    $portInt = [Int] $port
+                    $portInt = [Int]$port
                     $localResult = $using:result
                     $totalPorts = $using:totalPorts
 
@@ -219,7 +229,7 @@ function scanner {
                                     Host = $Target
                                     Port = $port
                                     State = $value
-                                    Service = $Service[0]
+                                    L4_Service = $Service[0]
                                     "IANA Standard Description" = $Service[1]
                                 }
 
@@ -241,9 +251,17 @@ function scanner {
         }
 
         Write-Host "`n[+] Layer 4 Scan Results:" @App
-        $phase1Data = $result.Values | Sort-Object host, port 
-        $phase1Data | Format-Table -AutoSize
+        
+        $result.Values | ForEach-Object {
+            $dto = [HostResult]::new($_.Host)
+            $dto.Port = $_.Port
+            $dto.State = $_.State
+            $dto.Service = $_.L4_Service
+            $dto.IANADescription = $_."IANA Standard Description"
+            $dto
+        } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, State, Service, IANADescription | Format-Table -AutoSize
 
+        $phase1Data = $result.Values | Sort-Object host, port 
         $openPorts = $phase1Data | Where-Object { $_.State -eq "Open" }
 
         if ($openPorts.Count -gt 0) {
