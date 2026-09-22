@@ -9,7 +9,7 @@ function scanner {
 
     function scannerApplication {
         param(
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [array]$OpenPorts
         )
 
@@ -27,14 +27,14 @@ function scanner {
             $tempFile = [System.IO.Path]::GetTempFileName()
             
             try {
-                ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath$tempFile -Encoding utf8
+                ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath $tempFile -Encoding utf8
                 
-                $denoOutput = (&$denoCmd run --quiet --allow-net --allow-read $scriptPath$tempFile) -join ""
+                $denoOutput = (& $denoCmd run --quiet --allow-net --allow-read $scriptPath $tempFile) -join ""
                 
                 if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
                     $l7Output = @($denoOutput | ConvertFrom-Json)
                     
-                    if ($null -ne$l7Output -and $l7Output.Count -gt 0) {$l7Output | ForEach-Object {
+                    if ($null -ne $l7Output -and $l7Output.Count -gt 0) {$l7Output | ForEach-Object {
                             $dto = [HostResult]::new($_.Host)
                             $dto.Port =$_.Port
                             $dto.Service =$_.L4_Service
@@ -50,7 +50,7 @@ function scanner {
             } catch {
                 Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen
             } finally {
-                if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force}
+                if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force }
             }
         } else {
             Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha
@@ -67,8 +67,8 @@ function scanner {
 
                 try {
                     $tcpClient = [System.Net.Sockets.TcpClient]::new()
-                    $connect = $tcpClient.BeginConnect($target, $port,$null, $null)
-                    $wait = $connect.AsyncWaitHandle.WaitOne(1000,$false)
+                    $connect = $tcpClient.BeginConnect($target, $port, $null, $null)
+                    $wait = $connect.AsyncWaitHandle.WaitOne(1000, $false)
 
                     if ($wait -and $tcpClient.Connected) {
                         $tcpClient.EndConnect($connect)
@@ -98,19 +98,19 @@ function scanner {
                         }
 
                         $reader = [System.IO.StreamReader]::new($activeStream)
-                        $readTask =$reader.ReadLineAsync()
+                        $readTask = $reader.ReadLineAsync()
                         
                         if ($readTask.Wait(2000)) {
-                            $bannerData =$readTask.Result
+                            $bannerData = $readTask.Result
                             if (-not [string]::IsNullOrWhiteSpace($bannerData)) {
-                                $banner =$bannerData.Trim()
+                                $banner = $bannerData.Trim()
                             }
                         }
                     }
                 } catch {
                     $banner = "Error: $($_.Exception.Message)"
                 } finally {
-                    if ($null -ne$tcpClient) {
+                    if ($null -ne $tcpClient) {
                         $tcpClient.Close()
                         $tcpClient.Dispose()
                     }
@@ -122,11 +122,11 @@ function scanner {
                     L4_Service = $item.L4_Service
                     L7_Banner = $banner
                 }
-                $localResult =$using:l7Result
-                $localResult[$key] =$r
+                $localResult = $using:l7Result
+                $localResult[$key] = $r
             } @ThrottleCreat
 
-            $validL7 = $l7Result.Values | Where-Object {$_.L7_Banner -ne "No Banner / Timeout" }
+            $validL7 = $l7Result.Values | Where-Object { $_.L7_Banner -ne "No Banner / Timeout" }
 
             if ($validL7.Count -gt 0) {
                 $validL7 | ForEach-Object {
@@ -161,8 +161,8 @@ function scanner {
         foreach ($target in $targets) {
             try {
                 $resolvedIP = [System.Net.Dns]::GetHostAddresses($target)[0]
-                $TargetIP =$resolvedIP.IPAddressToString
-                $TargetFamily =$resolvedIP.AddressFamily
+                $TargetIP = $resolvedIP.IPAddressToString
+                $TargetFamily = $resolvedIP.AddressFamily
             } catch {
                 Write-Warning "Failed to find IP for host: $target. Skipping this target..."
                 continue
@@ -174,46 +174,47 @@ function scanner {
             $totalPorts =$portsToScan.Count
 
             if ($totalPorts -gt 0) {                 0..($totalPorts - 1) | ForEach-Object -Parallel {
-                    $index =$_
-                    $portsToScan =$using:portsToScan
+                    $index = $_
+                    $portsToScan = $using:portsToScan
                     $port = $portsToScan[$index]
                     
-                    $Target =$using:target
-                    $TargetIP =$using:TargetIP
-                    $TargetFamily =$using:TargetFamily
-                    $portsHashTable =$using:portsHashTable
+                    $Target = $using:target
+                    $TargetIP = $using:TargetIP
+                    $TargetFamily = $using:TargetFamily
+                    $portsHashTable = $using:portsHashTable
                     $portInt = [Int]$port
-                    $localResult =$using:result
-                    $totalPorts =$using:totalPorts
+                    $localResult = $using:result
+                    $totalPorts = $using:totalPorts
 
                     $completed = (($index + 1) /$totalPorts) * 100
                     Write-Progress -Activity "Scanning ${Target}:$port" -Status "$([math]::Round($completed, 2))% complete" -PercentComplete $completed
 
-                    $obj = [System.Net.Sockets.Socket]::new($TargetFamily, 
+                    $obj = [System.Net.Sockets.Socket]::new(
+                        $TargetFamily, 
                         [System.Net.Sockets.SocketType]::Stream, 
                         [System.Net.Sockets.ProtocolType]::Tcp
                     )
 
-                    $obj.NoDelay =$true
+                    $obj.NoDelay = $true
                     $obj.SendTimeout = ($TargetIP -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^127\.') ? 100 : 500
                     $obj.ReceiveTimeout =$obj.SendTimeout
 
                     $ip = [System.Net.IPAddress]::Parse($TargetIP)
-                    $endpoint = [System.Net.IPEndPoint]::new($ip,$port)
+                    $endpoint = [System.Net.IPEndPoint]::new($ip, $port)
                     
                     try {
-                        $connect = $obj.BeginConnect($endpoint, $null,$null)
+                        $connect = $obj.BeginConnect($endpoint, $null, $null)
                         $Wait = $connect.AsyncWaitHandle.WaitOne($obj.SendTimeout, $false)
 
                         if (-not $Wait) {
-                            Write-Verbose -Message "$Target 'port'$port 'Closed - Timeout'" -Verbose
+                            Write-Verbose -Message "$Target 'port' $port 'Closed - Timeout'" -Verbose
                         }
                         else {
                             if ($obj.Connected) {
                                 $obj.EndConnect($connect)
 
                                 $value = "Open"
-                                Write-Verbose -Message "$Target 'port'$port Open'" -Verbose
+                                Write-Verbose -Message "$Target 'port' $port Open'" -Verbose
 
                                 if ($portsHashTable.ContainsKey($portInt)) {
                                     $Service = $portsHashTable[$portInt].Split('|')
@@ -231,14 +232,14 @@ function scanner {
                                 }
 
                                 $key = $Target + ":" + $port
-                                $localResult[$key] =$r
+                                $localResult[$key] = $r
                             }
                             else {
-                                Write-Verbose -Message "$Target 'port'$port 'Closed - Refused'" -Verbose
+                                Write-Verbose -Message "$Target 'port' $port 'Closed - Refused'" -Verbose
                             }
                         }
                     } catch {
-                        Write-Verbose -Message "$Target 'port'$port 'Error: $($_.Exception.Message)'" -Verbose
+                        Write-Verbose -Message "$Target 'port' $port 'Error: $($_.Exception.Message)'" -Verbose
                     } finally {
                         $obj.Close()
                         $obj.Dispose()
