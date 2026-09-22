@@ -23,7 +23,8 @@ function scanner {
         if ($null -ne $denoCmd) {
             Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net;
             
-            $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js');$tempFile = [System.IO.Path]::GetTempFileName();
+            $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js');
+            $tempFile = [System.IO.Path]::GetTempFileName();
             
             try {
                 ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath$tempFile -Encoding utf8;
@@ -65,14 +66,21 @@ function scanner {
                 $banner = "No Banner / Timeout";
 
                 try {
-                    $tcpClient = [System.Net.Sockets.TcpClient]::new();$connect = $tcpClient.BeginConnect($target, $port,$null, $null);$wait = $connect.AsyncWaitHandle.WaitOne(1000,$false);
+                    $tcpClient = [System.Net.Sockets.TcpClient]::new();
+                    $connect = $tcpClient.BeginConnect($target, $port,$null, $null);
+                    $wait = $connect.AsyncWaitHandle.WaitOne(1000,$false);
 
-                    if ($wait -and $tcpClient.Connected) {$tcpClient.EndConnect($connect);$stream = $tcpClient.GetStream();$stream.ReadTimeout = 2000;
+                    if ($wait -and $tcpClient.Connected) {
+                        $tcpClient.EndConnect($connect);
+                        $stream = $tcpClient.GetStream();
+                        $stream.ReadTimeout = 2000;
                         $stream.WriteTimeout = 2000;
                         
                         $activeStream =$stream;
 
-                        if ($port -in 443, 8443) {$sslStream = [System.Net.Security.SslStream]::new($stream);$sslTask = $sslStream.AuthenticateAsClientAsync($target);
+                        if ($port -in 443, 8443) {
+                            $sslStream = [System.Net.Security.SslStream]::new($stream);
+                            $sslTask = $sslStream.AuthenticateAsClientAsync($target);
                             if ($sslTask.Wait(1500)) {
                                 $activeStream =$sslStream;
                             } else {
@@ -80,7 +88,9 @@ function scanner {
                             }
                         }
 
-                        if ($port -in 80, 8080, 443, 8443) {$writer = [System.IO.StreamWriter]::new($activeStream);$writer.WriteLine("HEAD / HTTP/1.1");
+                        if ($port -in 80, 8080, 443, 8443) {
+                            $writer = [System.IO.StreamWriter]::new($activeStream);
+                            $writer.WriteLine("HEAD / HTTP/1.1");
                             $writer.WriteLine("Host: $target");
                             $writer.WriteLine("Connection: close");
                             $writer.WriteLine("");
@@ -117,7 +127,8 @@ function scanner {
 
             $validL7 = $l7Result.Values | Where-Object {$_.L7_Banner -ne "No Banner / Timeout" };
 
-            if ($validL7.Count -gt 0) {$validL7 | ForEach-Object {
+            if ($validL7.Count -gt 0) {
+                $validL7 | ForEach-Object {
                     $dto = [HostResult]::new($_.Host);
                     $dto.Port =$_.Port;
                     $dto.Service =$_.L4_Service;
@@ -186,11 +197,12 @@ function scanner {
                     $obj.SendTimeout = ($TargetIP -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^127\.') ? 100 : 500;
                     $obj.ReceiveTimeout =$obj.SendTimeout;
 
-                    $ip = [System.Net.IPAddress]::Parse($TargetIP);$endpoint = [System.Net.IPEndPoint]::new($ip,$port);
+                    $ip = [System.Net.IPAddress]::Parse($TargetIP);
+                    $endpoint = [System.Net.IPEndPoint]::new($ip,$port);
                     
                     try {
                         $connect = $obj.BeginConnect($endpoint, $null,$null);
-                        $Wait =$connect.AsyncWaitHandle.WaitOne($obj.SendTimeout, $false);
+                        $Wait = $connect.AsyncWaitHandle.WaitOne($obj.SendTimeout, $false);
 
                         if (-not $Wait) {
                             Write-Verbose -Message "$Target 'port'$port 'Closed - Timeout'" -Verbose;
@@ -202,7 +214,8 @@ function scanner {
                                 $value = "Open";
                                 Write-Verbose -Message "$Target 'port'$port Open'" -Verbose;
 
-                                if ($portsHashTable.ContainsKey($portInt)) {$Service = $portsHashTable[$portInt].Split('|');
+                                if ($portsHashTable.ContainsKey($portInt)) {
+                                    $Service = $portsHashTable[$portInt].Split('|');
                                 }
                                 else {
                                     $Service = @("Unknown", "Unknown");
