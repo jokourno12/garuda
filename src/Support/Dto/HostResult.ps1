@@ -6,6 +6,11 @@ class HostResult {
     [string]$InferredClassification
     [bool]$IsReachable
     [datetime]$Timestamp
+    [int]$Port
+    [string]$State
+    [string]$Service
+    [string]$IANADescription
+    [string]$L7Banner
 
     HostResult([string]$ip) {
         $this.IPAddress      = $ip
@@ -15,6 +20,11 @@ class HostResult {
         $this.InferredClassification = "Unknown Host"
         $this.IsReachable    = $false
         $this.Timestamp      = [datetime]::Now
+        $this.Port           = 0
+        $this.State          = "Unknown"
+        $this.Service        = "Unknown"
+        $this.IANADescription = "Unknown"
+        $this.L7Banner       = "No Banner / Timeout"
     }
 
     [string] GetDisplayProtocol() {
