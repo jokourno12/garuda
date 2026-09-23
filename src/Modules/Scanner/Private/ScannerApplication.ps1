@@ -14,7 +14,7 @@ function scannerApplication {
     if ($null -ne$denoCmd) {
         Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net
         
-        $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js')
+        $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'ScannerApplication.js')
         $tempFile = [System.IO.Path]::GetTempFileName()
         
         try {
