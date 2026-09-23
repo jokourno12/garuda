@@ -42,7 +42,7 @@ function scannerApplication {
         } catch {
             Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen
         } finally {
-            if (Test-Path $tempFile) { Remove-Item -Path$tempFile -Force }
+            if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force }
         }
     } else {
         Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha
