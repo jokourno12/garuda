@@ -7,7 +7,11 @@ function discover {
         [string[]]$targets
     )
 
-    $localIPs = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+    $localIPs = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+        Where-Object { $_.OperationalStatus -eq 'Up' -and $_.NetworkInterfaceType -ne 'Loopback' } |
+        ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+        Where-Object { $_.Address.AddressFamily -eq 'InterNetwork' } |
+        ForEach-Object { $_.Address.ToString() }
 
     $hostResults = [System.Collections.ArrayList]::new()
     $showMac = $false
@@ -31,7 +35,17 @@ function discover {
                     for ($i = 0; $i -lt 2; $i++) {
                         $reply = $pingSender.Send($ip, 1000)
                         if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
-                            $ttl = $reply.Options.Ttl
+                            $ttl = if ($null -ne $reply.Options) { $reply.Options.Ttl } else { $null }
+                            
+                            if ($null -eq $ttl) {
+                                $pingOut = ping -c 1 -W 1 $ip 2>$null | Out-String
+                                if ($pingOut -match 'ttl=(\d+)') {
+                                    $ttl = $matches[1]
+                                } else {
+                                    $ttl = "?"
+                                }
+                            }
+
                             $method = "ICMP (TTL:$ttl)"
                             break
                         }
@@ -86,12 +100,16 @@ function discover {
                     }
 
                     if ($showMac -or $runClassification) {
-                        if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
+                        $macResult = $null
+                        if ($IsWindows -and (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue)) {
                             $macResult = (Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
-                            $dto.MACAddress = if ($macResult) { $macResult } else { "N/A" }
-                        } else {
-                            $dto.MACAddress = "N/A (OS Not Supported)"
+                        } elseif ($IsLinux -and (Get-Command ip -ErrorAction SilentlyContinue)) {
+                            $arpLine = ip neigh show $ip 2>$null | Out-String
+                            if ($arpLine -match '([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}') {
+                                $macResult = $matches[0]
+                            }
                         }
+                        $dto.MACAddress = if ($macResult) { $macResult } else { "N/A" }
                     }
                     
                     if ($runClassification) {
@@ -118,7 +136,17 @@ function discover {
                 for ($i = 0; $i -lt 2; $i++) {
                     $reply = $pingSingle.Send($target, 1000)
                     if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
-                        $ttl = $reply.Options.Ttl
+                        $ttl = if ($null -ne $reply.Options) { $reply.Options.Ttl } else { $null }
+
+                        if ($null -eq $ttl) {
+                            $pingOut = ping -c 1 -W 1 $target 2>$null | Out-String
+                            if ($pingOut -match 'ttl=(\d+)') {
+                                $ttl = $matches[1]
+                            } else {
+                                $ttl = "?"
+                            }
+                        }
+
                         $method = "ICMP (TTL:$ttl)"
                         break
                     }
@@ -164,12 +192,16 @@ function discover {
                 }
 
                 if ($showMac -or $runClassification) { 
-                    if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
+                    $macResult = $null
+                    if ($IsWindows -and (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue)) {
                         $macResult = (Get-NetNeighbor -IPAddress $target -ErrorAction SilentlyContinue | Select-Object -First 1).LinkLayerAddress
-                        $dto.MACAddress = if ($macResult) { $macResult } else { "N/A" }
-                    } else {
-                        $dto.MACAddress = "N/A (OS Not Supported)"
+                    } elseif ($IsLinux -and (Get-Command ip -ErrorAction SilentlyContinue)) {
+                        $arpLine = ip neigh show $target 2>$null | Out-String
+                        if ($arpLine -match '([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}') {
+                            $macResult = $matches[0]
+                        }
                     }
+                    $dto.MACAddress = if ($macResult) { $macResult } else { "N/A" }
                 }
 
                 if ($runClassification) {
