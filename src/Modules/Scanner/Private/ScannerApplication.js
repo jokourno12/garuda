@@ -48,7 +48,7 @@ async function probeL7(item) {
     return { 
         Host: item.Host, 
         Port: item.Port, 
-        L4_Service: item.Service, 
+        L4_Service: item.L4_Service, 
         L7_Banner: banner 
     };
 }
