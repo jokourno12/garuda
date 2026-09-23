@@ -14,7 +14,7 @@ function scannerApplication {
     if ($null -ne$denoCmd) {
         Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net
         
-        $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'Private', 'ScannerApplication.js')
+        $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'ScannerApplication.js')
         $tempFile = [System.IO.Path]::GetTempFileName()
         
         try {
@@ -42,7 +42,7 @@ function scannerApplication {
         } catch {
             Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen
         } finally {
-            if (Test-Path $tempFile) { Remove-Item -Path$tempFile -Force }
+            if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force }
         }
     } else {
         Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha
