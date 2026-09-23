@@ -45,6 +45,9 @@ We ruthlessly eliminate waste to keep Garuda fast, lightweight, and rock-solid r
    ```
 5. Display the help information:
    ```bash
+   function garuda { & "$PWD/src/index.ps1" @args }
+   ```
+   ```bash
    ./src/index.ps1 -help
    ```
 Note (Windows): If script execution is blocked by the default Windows Execution Policy, run the following command in your PowerShell session before executing the script:
