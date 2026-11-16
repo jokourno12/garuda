@@ -7,7 +7,7 @@ function updatePortDatabase {
     if (Test-Path -Path $PortListPath -PathType Leaf) {
         $fileInfo = Get-Item -Path $PortListPath
         
-        if ($fileInfo.CreationTime -gt (Get-Date).AddDays(-28)) {
+        if ($fileInfo.LastWriteTime -gt (Get-Date).AddDays(-28)) {
             Write-Verbose -Message "Read ports.txt and fill hash table..."
             $portsHashTable = populatePortsHash -PortListPath $PortListPath
             $needsUpdate = $false
