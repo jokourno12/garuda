@@ -3,6 +3,7 @@
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'DiscoverCommand.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'QuickScanCommand.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'FullScanCommand.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Commands', 'TracerCommand.ps1'))"
 
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Banner.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Support', 'Help.ps1'))"
@@ -47,4 +48,13 @@ function fullScanEngine {
     )
 
     fullScanCommand -targets $targets -pMin $pMin -pMax $pMax -ports $ports
+}
+
+function tracerEngine {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string[]]$entity
+    )
+
+    tracerCommand -entity $entity
 }
