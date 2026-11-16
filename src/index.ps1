@@ -8,6 +8,7 @@ param(
 	[switch]$discover,
 	[switch]$quickScan,
 	[switch]$fullScan,
+        [switch]$tracer,
 
 	# Port Configuration
 	[int]$pMin = 1,
@@ -23,6 +24,16 @@ showBanner
 if ($help) {
 	helpEngine
 	return
+}
+
+if ($tracer) {
+    if (-not $targets) {
+        Write-Host "Error: You must enter an object to trace (e.g., Email)." @Pen
+        return
+    }
+
+    tracerEngine -entity $targets
+    return
 }
 
 if (-not $targets) {
