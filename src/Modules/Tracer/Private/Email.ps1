@@ -123,37 +123,226 @@ function Get-ContactInfo {
 function Get-NetworkConnection {
     param (
         [Parameter(Mandatory = $true)]
+        [ValidatePattern('^[^@\s]+@[^@\s]+\.[^@\s]+$')]
         [string]$Address
     )
 
     $normalized = $Address.Trim().ToLower()
     $domain = ($normalized -split '@', 2)[1]
 
-    # Helper internal untuk kueri DNS (default resolver -> fallback 1.1.1.1)
-    $InvokeDnsQuery = {
+    # Deteksi OS yang kompatibel untuk Windows PowerShell 5.1 maupun PowerShell 7+
+    $osPlatform = if ($null -ne $IsWindows -and $IsWindows) {
+        'Windows'
+    }
+    elseif ($null -ne $IsLinux -and $IsLinux) {
+        'Linux'
+    }
+    elseif ($null -ne $IsMacOS -and $IsMacOS) {
+        'macOS'
+    }
+    elseif ($env:OS -eq 'Windows_NT') {
+        'Windows'
+    }
+    else {
+        'Unknown'
+    }
+
+    # Helper internal untuk parsing output CLI 'dig' (dipakai di Linux & macOS)
+    $InvokeDigParser = {
+        param ([string]$QueryName, [string]$RecordType, [string]$DnsServer = '')
+
+        $digArgs = @('+short', '+time=3', '+tries=1')
+        if (-not [string]::IsNullOrWhiteSpace($DnsServer)) {
+            # Di-quote agar '@' tidak dianggap operator splatting oleh PowerShell
+            $digArgs += "@$DnsServer"
+        }
+
+        if ($RecordType -eq 'PTR') {
+            $digArgs += @('-x', $QueryName)
+        }
+        else {
+            $digArgs += @($RecordType, $QueryName)
+        }
+
+        $rawLines = & dig @digArgs 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $rawLines) {
+            return @()
+        }
+
+        $parsed = @()
+        foreach ($line in $rawLines) {
+            $cleanLine = $line.Trim()
+            if ([string]::IsNullOrWhiteSpace($cleanLine) -or $cleanLine -match '^;') { continue }
+
+            switch ($RecordType) {
+                'MX' {
+                    if ($cleanLine -match '^(\d+)\s+(.+)$') {
+                        $parsed += [PSCustomObject]@{
+                            Type         = 'MX'
+                            Preference   = [int]$Matches[1]
+                            NameExchange = $Matches[2].Trim()
+                        }
+                    }
+                }
+                'A' {
+                    if ($cleanLine -match '^\d{1,3}(\.\d{1,3}){3}$') {
+                        $parsed += [PSCustomObject]@{
+                            Type      = 'A'
+                            IPAddress = $cleanLine
+                        }
+                    }
+                }
+                'PTR' {
+                    $parsed += [PSCustomObject]@{
+                        Type     = 'PTR'
+                        NameHost = $cleanLine
+                    }
+                }
+                'TXT' {
+                    # Gabungkan multi-string TXT dan hapus tanda kutip pembungkus
+                    $txtClean = ($cleanLine -replace '^"|"$', '' -replace '"\s+"', '').Trim()
+                    $parsed += [PSCustomObject]@{
+                        Type = 'TXT'
+                        Text = $txtClean
+                    }
+                }
+            }
+        }
+        return $parsed
+    }
+
+    # Helper fallback universal via Cloudflare DoH (jika 'dig' tidak terpasang di distro Linux minimal)
+    $InvokeDohQuery = {
         param ([string]$QueryName, [string]$RecordType)
+
+        $dohName = if ($RecordType -eq 'PTR' -and $QueryName -match '^(\d+)\.(\d+)\.(\d+)\.(\d+)$') {
+            "$($Matches[4]).$($Matches[3]).$($Matches[2]).$($Matches[1]).in-addr.arpa"
+        }
+        else {
+            $QueryName
+        }
+
+        $dohUri = "https://cloudflare-dns.com/dns-query?name=$([uri]::EscapeDataString($dohName))&type=$RecordType"
+        $headers = @{ 'Accept' = 'application/dns-json' }
+
         try {
-            return Resolve-DnsName -Name $QueryName -Type $RecordType -DnsOnly -ErrorAction Stop
+            $res = Invoke-RestMethod -Uri $dohUri -Headers $headers -TimeoutSec 8 -ErrorAction Stop
+            if (-not $res.Answer) { return @() }
+
+            $parsed = @()
+            foreach ($ans in $res.Answer) {
+                switch ($ans.type) {
+                    15 { # MX
+                        if ($RecordType -eq 'MX' -and $ans.data -match '^(\d+)\s+(.+)$') {
+                            $parsed += [PSCustomObject]@{
+                                Type         = 'MX'
+                                Preference   = [int]$Matches[1]
+                                NameExchange = $Matches[2].Trim()
+                            }
+                        }
+                    }
+                    1 { # A
+                        if ($RecordType -eq 'A') {
+                            $parsed += [PSCustomObject]@{
+                                Type      = 'A'
+                                IPAddress = $ans.data.Trim()
+                            }
+                        }
+                    }
+                    12 { # PTR
+                        if ($RecordType -eq 'PTR') {
+                            $parsed += [PSCustomObject]@{
+                                Type     = 'PTR'
+                                NameHost = $ans.data.Trim()
+                            }
+                        }
+                    }
+                    16 { # TXT
+                        if ($RecordType -eq 'TXT') {
+                            $txtClean = ($ans.data -replace '^"|"$', '' -replace '"\s+"', '').Trim()
+                            $parsed += [PSCustomObject]@{
+                                Type = 'TXT'
+                                Text = $txtClean
+                            }
+                        }
+                    }
+                }
+            }
+            return $parsed
         }
         catch {
-            try {
-                return Resolve-DnsName -Name $QueryName -Type $RecordType -Server '1.1.1.1' -DnsOnly -ErrorAction Stop
+            return @()
+        }
+    }
+
+    # Dispatcher Kueri DNS berdasarkan Sistem Operasi
+    $InvokeDnsQuery = {
+        param ([string]$QueryName, [string]$RecordType)
+
+        switch ($osPlatform) {
+            'Windows' {
+                # Windows: Gunakan cmdlet native Resolve-DnsName (default resolver -> fallback 1.1.1.1)
+                $raw = $null
+                try {
+                    $raw = Resolve-DnsName -Name $QueryName -Type $RecordType -DnsOnly -ErrorAction Stop
+                }
+                catch {
+                    try {
+                        $raw = Resolve-DnsName -Name $QueryName -Type $RecordType -Server '1.1.1.1' -DnsOnly -ErrorAction Stop
+                    }
+                    catch {
+                        return @()
+                    }
+                }
+
+                $normalizedRecords = @()
+                foreach ($r in ($raw | Where-Object { $_.QueryType -eq $RecordType })) {
+                    switch ($RecordType) {
+                        'MX'  { $normalizedRecords += [PSCustomObject]@{ Type = 'MX'; Preference = $r.Preference; NameExchange = $r.NameExchange } }
+                        'A'   { $normalizedRecords += [PSCustomObject]@{ Type = 'A'; IPAddress = $r.IPAddress } }
+                        'PTR' { $normalizedRecords += [PSCustomObject]@{ Type = 'PTR'; NameHost = $r.NameHost } }
+                        'TXT' { $normalizedRecords += [PSCustomObject]@{ Type = 'TXT'; Text = ($r.Strings -join '').Trim() } }
+                    }
+                }
+                return $normalizedRecords
             }
-            catch {
-                return $null
+
+            'macOS' {
+                # macOS: Utilitas 'dig' selalu tersedia secara bawaan sistem
+                $res = & $InvokeDigParser -QueryName $QueryName -RecordType $RecordType
+                if ($res.Count -eq 0) {
+                    $res = & $InvokeDigParser -QueryName $QueryName -RecordType $RecordType -DnsServer '1.1.1.1'
+                }
+                if ($res.Count -eq 0) {
+                    $res = & $InvokeDohQuery -QueryName $QueryName -RecordType $RecordType
+                }
+                return $res
+            }
+
+            'Linux' {
+                # Linux: Gunakan 'dig' (dnsutils/bind-tools) jika tersedia, fallback otomatis ke DoH jika distro minimal
+                if (Get-Command -Name 'dig' -ErrorAction SilentlyContinue) {
+                    $res = & $InvokeDigParser -QueryName $QueryName -RecordType $RecordType
+                    if ($res.Count -eq 0) {
+                        $res = & $InvokeDigParser -QueryName $QueryName -RecordType $RecordType -DnsServer '1.1.1.1'
+                    }
+                    if ($res.Count -gt 0) { return $res }
+                }
+                return (& $InvokeDohQuery -QueryName $QueryName -RecordType $RecordType)
+            }
+
+            default {
+                return (& $InvokeDohQuery -QueryName $QueryName -RecordType $RecordType)
             }
         }
     }
 
     # 1. Kueri MX Record
-    $rawMx = & $InvokeDnsQuery -QueryName $domain -RecordType 'MX'
-    $mxRecords = @()
-    if ($rawMx) {
-        $mxRecords = @($rawMx | Where-Object { $_.QueryType -eq 'MX' } | Sort-Object Preference)
-    }
+    $mxRecords = @(& $InvokeDnsQuery -QueryName $domain -RecordType 'MX' | Sort-Object Preference)
 
     if ($mxRecords.Count -eq 0) {
         return [PSCustomObject]@{
+            Platform    = $osPlatform
             Domain      = $domain
             HasMX       = $false
             MXCount     = 0
@@ -196,81 +385,70 @@ function Get-NetworkConnection {
     $primaryMxIp = $null
     $reverseDns = $null
 
-    $aRecords = & $InvokeDnsQuery -QueryName $primaryMx -RecordType 'A'
-    if ($aRecords) {
-        $firstA = $aRecords | Where-Object { $_.QueryType -eq 'A' } | Select-Object -First 1
-        if ($firstA -and $firstA.IPAddress) {
-            $primaryMxIp = $firstA.IPAddress
+    $firstA = & $InvokeDnsQuery -QueryName $primaryMx -RecordType 'A' | Select-Object -First 1
+    if ($firstA -and $firstA.IPAddress) {
+        $primaryMxIp = $firstA.IPAddress
 
-            $ptrRecords = & $InvokeDnsQuery -QueryName $primaryMxIp -RecordType 'PTR'
-            if ($ptrRecords) {
-                $firstPtr = $ptrRecords | Where-Object { $_.QueryType -eq 'PTR' } | Select-Object -First 1
-                if ($firstPtr -and $firstPtr.NameHost) {
-                    $reverseDns = $firstPtr.NameHost.TrimEnd('.').ToLower()
-                }
-            }
+        $firstPtr = & $InvokeDnsQuery -QueryName $primaryMxIp -RecordType 'PTR' | Select-Object -First 1
+        if ($firstPtr -and $firstPtr.NameHost) {
+            $reverseDns = $firstPtr.NameHost.TrimEnd('.').ToLower()
         }
     }
 
     # 4. Audit Keamanan Email: SPF (TXT pada domain utama)
     $spfStatus = 'Missing'
     $rootTxt = & $InvokeDnsQuery -QueryName $domain -RecordType 'TXT'
-    if ($rootTxt) {
-        foreach ($rec in ($rootTxt | Where-Object { $_.QueryType -eq 'TXT' })) {
-            $txtValue = ($rec.Strings -join '').Trim()
-            if ($txtValue -match '^v=spf1\b') {
-                if ($txtValue -match '-all\b') {
-                    $spfStatus = 'Present / -all'
-                }
-                elseif ($txtValue -match '~all\b') {
-                    $spfStatus = 'Present / ~all'
-                }
-                elseif ($txtValue -match '\?all\b') {
-                    $spfStatus = 'Present / ?all'
-                }
-                elseif ($txtValue -match '\+all\b') {
-                    $spfStatus = 'Weak / +all'
-                }
-                else {
-                    $spfStatus = 'Present'
-                }
-                break
+    foreach ($rec in $rootTxt) {
+        if ($rec.Text -match '^v=spf1\b') {
+            if ($rec.Text -match '-all\b') {
+                $spfStatus = 'Present / -all'
             }
+            elseif ($rec.Text -match '~all\b') {
+                $spfStatus = 'Present / ~all'
+            }
+            elseif ($rec.Text -match '\?all\b') {
+                $spfStatus = 'Present / ?all'
+            }
+            elseif ($rec.Text -match '\+all\b') {
+                $spfStatus = 'Weak / +all'
+            }
+            elseif ($rec.Text -match '\bredirect=([^\s]+)') {
+                $spfStatus = "Present / redirect ($($Matches[1]))"
+            }
+            else {
+                $spfStatus = 'Present'
+            }
+            break
         }
     }
 
     # 5. Audit Keamanan Email: DMARC (TXT pada _dmarc.<domain>)
     $dmarcStatus = 'Missing'
     $dmarcTxt = & $InvokeDnsQuery -QueryName "_dmarc.$domain" -RecordType 'TXT'
-    if ($dmarcTxt) {
-        foreach ($rec in ($dmarcTxt | Where-Object { $_.QueryType -eq 'TXT' })) {
-            $txtValue = ($rec.Strings -join '').Trim()
-            if ($txtValue -match '^v=DMARC1\b') {
-                if ($txtValue -match '\bp=([a-zA-Z]+)') {
-                    $dmarcStatus = "p=$($Matches[1].ToLower())"
-                }
-                else {
-                    $dmarcStatus = 'Present'
-                }
-                break
+    foreach ($rec in $dmarcTxt) {
+        if ($rec.Text -match '^v=DMARC1\b') {
+            if ($rec.Text -match '\bp=([a-zA-Z]+)') {
+                $dmarcStatus = "p=$($Matches[1].ToLower())"
             }
+            else {
+                $dmarcStatus = 'Present'
+            }
+            break
         }
     }
 
     # 6. Audit Enkripsi Transport: MTA-STS (TXT pada _mta-sts.<domain>)
     $mtastsStatus = 'Not configured'
     $mtastsTxt = & $InvokeDnsQuery -QueryName "_mta-sts.$domain" -RecordType 'TXT'
-    if ($mtastsTxt) {
-        foreach ($rec in ($mtastsTxt | Where-Object { $_.QueryType -eq 'TXT' })) {
-            $txtValue = ($rec.Strings -join '').Trim()
-            if ($txtValue -match '^v=STSv1\b') {
-                $mtastsStatus = 'Enabled'
-                break
-            }
+    foreach ($rec in $mtastsTxt) {
+        if ($rec.Text -match '^v=STSv1\b') {
+            $mtastsStatus = 'Enabled'
+            break
         }
     }
 
     return [PSCustomObject]@{
+        Platform    = $osPlatform
         Domain      = $domain
         HasMX       = $true
         MXCount     = $mxRecords.Count
