@@ -8,7 +8,7 @@ function tracerCommand {
 
     $emailPattern = '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     $phonePattern = '^(\+?[1-9]\d{7,14}|0\d{8,13})$'
-    $urlPattern   = '^https?://[^\s/$.?#].[^\s]*$'
+    $urlPattern   = '^(https?://)?((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(?::\d{1,5})?(?:[/?#][^\s]*)?$'
 
     foreach ($item in $entity) {
         $cleanItem = $item.Trim()
@@ -26,7 +26,8 @@ function tracerCommand {
                 tracer -phone $normalizedPhone
                 break
             }
-            { ($cleanItem -match $urlPattern) -and ([System.Uri]::TryCreate($cleanItem, [System.UriKind]::Absolute, [ref]$uriObj)) -and ($uriObj.Host -match '\.') } {
+            { ($cleanItem -match $urlPattern) -and ([System.Uri]::TryCreate($(if ($cleanItem -match '^https?://') { $cleanItem } else { "https://$cleanItem" }), [System.UriKind]::Absolute, [ref]$uriObj)) -and ($uriObj.Host -match '\.') } {
+                if ($cleanItem -notmatch '^https?://') { $cleanItem = "https://$cleanItem" }
                 Write-Host "[+] Valid URL detected: $cleanItem" @Cha
                 tracer -url $cleanItem
                 break
