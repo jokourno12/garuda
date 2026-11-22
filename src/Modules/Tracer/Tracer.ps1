@@ -1,5 +1,7 @@
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'Email.ps1'))"
 . "$([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'Phone.ps1'))"
+. "$([System.IO.Path]::Combine($PSScriptRoot, 'Private', 'Url.ps1'))"
+
 
 function tracer {
     [CmdletBinding()]
@@ -8,7 +10,10 @@ function tracer {
         [string]$email,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'Phone')]
-        [string]$phone
+        [string]$phone,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Url')]
+        [string]$url
     )
 
     switch ($PSCmdlet.ParameterSetName) {
@@ -19,6 +24,10 @@ function tracer {
         'Phone' {
             Write-Host "Tracing Phone: $phone" @Cha
             phone -target $phone
+        }
+        'Url' {
+            Write-Host "Tracing Url: $url" @Cha
+            url -target $url
         }
     }
 }
