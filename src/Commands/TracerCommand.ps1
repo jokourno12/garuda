@@ -9,11 +9,13 @@ function tracerCommand {
     $emailPattern = '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     $phonePattern = '^(\+?[1-9]\d{7,14}|0\d{8,13})$'
     $urlPattern   = '^(https?://)?((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(?::\d{1,5})?(?:[/?#][^\s]*)?$'
+    $ipObj        = $null
 
     foreach ($item in $entity) {
         $cleanItem = $item.Trim()
         $normalizedPhone = $cleanItem -replace '[\s\-\(\)]', ''
         $uriObj = $null
+        $ipObj  = $null
 
         switch -Regex ($cleanItem) {
             $emailPattern {
@@ -24,6 +26,12 @@ function tracerCommand {
             { $normalizedPhone -match $phonePattern } {
                 Write-Host "[+] Valid Phone detected: $normalizedPhone" @Cha
                 tracer -phone $normalizedPhone
+                break
+            }
+            { [System.Net.IPAddress]::TryParse($cleanItem, [ref]$ipObj) -and ($cleanItem -match '[:.]') } {
+                $cleanItem = $ipObj.ToString()
+                Write-Host "[+] Valid IP detected: $cleanItem" @Cha
+                tracer -ip $cleanItem
                 break
             }
             { ($cleanItem -match $urlPattern) -and ([System.Uri]::TryCreate($(if ($cleanItem -match '^https?://') { $cleanItem } else { "https://$cleanItem" }), [System.UriKind]::Absolute, [ref]$uriObj)) -and ($uriObj.Host -match '\.') } {
