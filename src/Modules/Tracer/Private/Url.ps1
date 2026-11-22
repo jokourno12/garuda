@@ -5,8 +5,134 @@ function url {
         [string]$target
     )
 
+    Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+
     $chaStyle = if ($script:Cha) { $script:Cha } elseif ($global:Cha) { $global:Cha } else { @{} }
     $penStyle = if ($script:Pen) { $script:Pen } elseif ($global:Pen) { $global:Pen } else { @{} }
+
+    # Batas keamanan global
+    $maxResponseBytes = 5 * 1024 * 1024 # Maksimal 5 MB per dokumen/skrip (anti zip-bomb)
+    $regexTimeout     = [TimeSpan]::FromSeconds(2)
+
+    # Helper: Validasi URI, Resolusi DNS & Cegah SSRF ke jaringan lokal/privat
+    $testSafePublicUri = {
+        param([System.Uri]$Uri)
+        if ($null -eq $Uri -or -not $Uri.IsAbsoluteUri) {
+            return [PSCustomObject]@{ Safe = $false; Reason = "Format URI tidak valid" }
+        }
+        if ($Uri.Scheme -notin 'http', 'https') {
+            return [PSCustomObject]@{ Safe = $false; Reason = "Skema '$($Uri.Scheme)' tidak diizinkan (hanya http/https)" }
+        }
+        if ([string]::IsNullOrWhiteSpace($Uri.DnsSafeHost)) {
+            return [PSCustomObject]@{ Safe = $false; Reason = "Host kosong" }
+        }
+
+        try {
+            $ips = [System.Net.Dns]::GetHostAddresses($Uri.DnsSafeHost)
+            if (-not $ips -or $ips.Count -eq 0) {
+                return [PSCustomObject]@{ Safe = $false; Reason = "DNS tidak menghasilkan alamat IP" }
+            }
+
+            foreach ($ip in $ips) {
+                if ([System.Net.IPAddress]::IsLoopback($ip)) {
+                    return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke Loopback ($ip) - kemungkinan DNS sinkhole/lokal" }
+                }
+
+                $bytes = $ip.GetAddressBytes()
+                if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                    if ($bytes[0] -eq 0) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke 0.0.0.0/8 ($ip) - domain diblokir/sinkhole DNS" }
+                    }
+                    if ($bytes[0] -in 10, 127) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke IP Privat/Loopback ($ip)" }
+                    }
+                    if ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke IP Privat ($ip)" }
+                    }
+                    if ($bytes[0] -eq 192 -and $bytes[1] -eq 168) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke IP Privat ($ip)" }
+                    }
+                    if ($bytes[0] -eq 169 -and $bytes[1] -eq 254) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke Link-Local/Metadata ($ip)" }
+                    }
+                    if ($bytes[0] -ge 224) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke IP Multicast/Reserved ($ip)" }
+                    }
+                }
+                elseif ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+                    if ($ip.IsIPv6LinkLocal -or $ip.IsIPv6SiteLocal -or $ip.IsIPv6Multicast) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke IPv6 Lokal/Reserved ($ip)" }
+                    }
+                    if (($bytes[0] -band 0xFE) -eq 0xFC) {
+                        return [PSCustomObject]@{ Safe = $false; Reason = "Mengarah ke IPv6 Unique Local ($ip)" }
+                    }
+                }
+            }
+            return [PSCustomObject]@{ Safe = $true; Reason = "OK" }
+        }
+        catch {
+            $dnsErr = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+            return [PSCustomObject]@{ Safe = $false; Reason = "Gagal resolusi DNS / Domain mati ($dnsErr)" }
+        }
+    }
+
+    # Helper: Pembaca stream HTTP dengan batas byte tegas (anti decompression bomb)
+    $readSafeResponseString = {
+        param(
+            [System.Net.Http.HttpResponseMessage]$Response,
+            [int]$MaxBytes
+        )
+        $stream = $Response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        try {
+            $ms = [System.IO.MemoryStream]::new()
+            try {
+                $buffer    = New-Object byte[] 8192
+                $totalRead = 0
+                while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $totalRead += $read
+                    if ($totalRead -gt $MaxBytes) {
+                        throw "Ukuran respons melebihi batas aman ($([math]::Round($MaxBytes / 1MB, 1)) MB)."
+                    }
+                    $ms.Write($buffer, 0, $read)
+                }
+
+                $encoding = [System.Text.Encoding]::UTF8
+                $charset  = $null
+                if ($Response.Content.Headers.ContentType) {
+                    $charset = $Response.Content.Headers.ContentType.CharSet
+                }
+                if (-not [string]::IsNullOrWhiteSpace($charset)) {
+                    try { $encoding = [System.Text.Encoding]::GetEncoding($charset.Trim('"')) } catch {}
+                }
+                return $encoding.GetString($ms.ToArray())
+            }
+            finally {
+                $ms.Dispose()
+            }
+        }
+        finally {
+            $stream.Dispose()
+        }
+    }
+
+    # Sanitasi output string dari karakter kontrol / ANSI escape injection
+    $sanitizeText = {
+        param([string]$Text)
+        if ([string]::IsNullOrEmpty($Text)) { return "" }
+        return ($Text -replace '[\x00-\x1F\x7F]', '').Trim()
+    }
+
+    # Validasi awal URL target
+    $initialUri = $null
+    if (-not [System.Uri]::TryCreate($target, [System.UriKind]::Absolute, [ref]$initialUri)) {
+        Write-Host "[!] Format URL tidak valid: '$target'" @penStyle
+        return
+    }
+    $initialCheck = & $testSafePublicUri $initialUri
+    if (-not $initialCheck.Safe) {
+        Write-Host "[!] Diblokir: Target '$target' -> $($initialCheck.Reason)" @penStyle
+        return
+    }
 
     # Cari folder Runtime dari lokasi skrip, parent folder, maupun direktori aktif ($PWD)
     $basePaths = @(
@@ -48,31 +174,71 @@ function url {
         Write-Host "[!] Jint.dll / Acornima.dll tidak ditemukan di sub-direktori proyek." @penStyle
     }
 
-    # Helper lokal untuk mengeksekusi JS di sandbox Jint dan menangkap panggilan URL dinamis
-    $invokeJsSandbox = {
-        param(
-            [string[]]$CodeBlocks,
-            [System.Uri]$BaseUri,
-            [string]$ScriptUrl = "",
-            [string]$ScriptInnerText = ""
-        )
+    # Helper untuk membuat 1 instance Jint Sandbox terpadu per halaman (kompatibel Jint 4.x & 3.x)
+    $newJsPageSandbox = {
+        param([System.Uri]$BaseUri)
 
-        $captured = [System.Collections.Generic.List[string]]::new()
+        $captured = [System.Collections.Generic.Queue[string]]::new()
         $errors   = [System.Collections.Generic.List[string]]::new()
-        $result   = [PSCustomObject]@{ Urls = $captured; Errors = $errors }
 
-        if (-not $hasJint -or -not $CodeBlocks -or $CodeBlocks.Count -eq 0) { return $result }
+        if (-not $hasJint) { return $null }
 
-        $cts  = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(4))
+        $cts  = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(6))
         $opts = [Jint.Options]::new()
-        try { [void][Jint.OptionsExtensions]::CancellationToken($opts, $cts.Token) } catch {}
-        try { [void][Jint.OptionsExtensions]::LimitMemory($opts, [long](64 * 1024 * 1024)) } catch {}
-        try { [void][Jint.OptionsExtensions]::MaxStatements($opts, 500000) } catch {}
+
+        # Pastikan CLR interop nonaktif (Jint 4.x & 3.x)
+        if ($null -ne $opts.PSObject.Properties['Interop'] -and $null -ne $opts.Interop) {
+            if ($null -ne $opts.Interop.PSObject.Properties['Enabled']) {
+                $opts.Interop.Enabled = $false
+            }
+        }
+        else {
+            try { $opts = $opts.AllowClr($false) } catch {}
+        }
+
+        # Jint 4.x: Cari extension method publik pada static class di Jint.dll (termasuk Jint.Constraints.OptionsExtensions)
+        $jintAsm   = [Jint.Engine].Assembly
+        $jintTypes = try { $jintAsm.GetTypes() } catch [System.Reflection.ReflectionTypeLoadException] { $_.Exception.Types | Where-Object { $null -ne $_ } }
+
+        $invokeJintExt = {
+            param([ref]$OptionsRef, [string]$MethodName, $ArgVal)
+            foreach ($t in $jintTypes) {
+                if (-not ($t.IsAbstract -and $t.IsSealed)) { continue }
+                $m = $t.GetMethods([System.Reflection.BindingFlags]'Public,Static') |
+                    Where-Object {
+                        $_.Name -eq $MethodName -and
+                        $_.GetParameters().Count -eq 2 -and
+                        $_.GetParameters()[0].ParameterType -eq [Jint.Options]
+                    } | Select-Object -First 1
+                if ($m) {
+                    $pType    = $m.GetParameters()[1].ParameterType
+                    $typedArg = if ($pType.IsInstanceOfType($ArgVal)) { $ArgVal } else { [System.Convert]::ChangeType($ArgVal, $pType) }
+                    $res      = $m.Invoke($null, [object[]]@($OptionsRef.Value, $typedArg))
+                    if ($null -ne $res) { $OptionsRef.Value = $res }
+                    return $true
+                }
+            }
+            return $false
+        }
+
+        $memLimited  = & $invokeJintExt ([ref]$opts) 'LimitMemory'       ([long](64 * 1024 * 1024))
+        $stmtLimited = & $invokeJintExt ([ref]$opts) 'MaxStatements'     ([int]1000000)
+        $ctsBound    = & $invokeJintExt ([ref]$opts) 'CancellationToken' ($cts.Token)
+        [void](& $invokeJintExt ([ref]$opts) 'TimeoutInterval' ([TimeSpan]::FromSeconds(6)))
+        [void](& $invokeJintExt ([ref]$opts) 'LimitRecursion'  ([int]64))
+        [void](& $invokeJintExt ([ref]$opts) 'MaxArraySize'    ([int]100000))
+
+        if (-not ($memLimited -and $stmtLimited -and $ctsBound)) {
+            $cts.Dispose()
+            Write-Host "[!] Peringatan Keamanan: Limit Jint gagal (Mem=$memLimited, Stmt=$stmtLimited, Cts=$ctsBound)." @penStyle
+            return $null
+        }
 
         $engine = [Jint.Engine]::new($opts)
 
-        # Suntikkan List[string] C# langsung agar JS memanggil __sink.Add() tanpa delegate PowerShell
-        $engine.SetValue("__sink", $captured) | Out-Null
+        # Suntikkan pure delegate Action[string] agar tidak bisa direfleksikan/di-Clear() oleh JS
+        $captureDelegate = [System.Delegate]::CreateDelegate([System.Action[string]], $captured, "Enqueue")
+        $engine.SetValue("__nativeCapture", $captureDelegate) | Out-Null
 
         $escapeJs = {
             param([string]$Val)
@@ -80,14 +246,12 @@ function url {
             return ($Val -replace '\\', '\\' -replace "'", "\'" -replace "`r", '\r' -replace "`n", '\n')
         }
 
-        $safeHref        = & $escapeJs $BaseUri.AbsoluteUri
-        $safeHost        = & $escapeJs $BaseUri.Host
-        $safeProto       = & $escapeJs "$($BaseUri.Scheme):"
-        $safeOrigin      = & $escapeJs "$($BaseUri.Scheme)://$($BaseUri.Authority)"
-        $safePath        = & $escapeJs $BaseUri.AbsolutePath
-        $safeSearch      = & $escapeJs $BaseUri.Query
-        $safeScriptUrl   = & $escapeJs $ScriptUrl
-        $safeScriptInner = & $escapeJs $ScriptInnerText
+        $safeHref   = & $escapeJs $BaseUri.AbsoluteUri
+        $safeHost   = & $escapeJs $BaseUri.Host
+        $safeProto  = & $escapeJs "$($BaseUri.Scheme):"
+        $safeOrigin = & $escapeJs "$($BaseUri.Scheme)://$($BaseUri.Authority)"
+        $safePath   = & $escapeJs $BaseUri.AbsolutePath
+        $safeSearch = & $escapeJs $BaseUri.Query
 
         $shim = @'
 var window = this, self = this, globalThis = this;
@@ -100,15 +264,15 @@ function __capture(v) {
     if (v !== null && v !== undefined) {
         var s = String(v).trim();
         if (s !== '') {
-            __sink.Add(s.replace(/&amp;/g, '&'));
+            __nativeCapture(s);
         }
     }
 }
 
-// Polyfill Base64 (atob / btoa)
+// Polyfill Base64 (atob / btoa) tahan whitespace/obfuscation
 var _b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
 function atob(input) {
-    var str = String(input || '').replace(/=+$/, '');
+    var str = String(input || '').replace(/[^A-Za-z0-9+/=]/g, '').replace(/=+$/, '');
     var output = '';
     for (var bc = 0, bs = 0, buffer, i = 0; buffer = str.charAt(i++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
         buffer = _b64chars.indexOf(buffer);
@@ -197,9 +361,17 @@ URL.prototype.toString = function() { return this.href; };
 
 function _extractHtmlUrls(html) {
     var str = String(html || '');
-    var attrRegex = /\b(?:src|href|data|action)\s*=\s*["']([^"']+)["']/gi;
+    var attrRegex = /\b(?:src|href|data|action|poster)\s*=\s*["']([^"']+)["']/gi;
     var match;
     while ((match = attrRegex.exec(str)) !== null) {
+        __capture(match[1]);
+    }
+    var metaRegex = /http-equiv\s*=\s*["']refresh["'][^>]*content\s*=\s*["'][^"']*url\s*=\s*([^"';\s]+)/gi;
+    while ((match = metaRegex.exec(str)) !== null) {
+        __capture(match[1]);
+    }
+    var cssRegex = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+    while ((match = cssRegex.exec(str)) !== null) {
         __capture(match[1]);
     }
 }
@@ -222,9 +394,25 @@ var location = {
 window.location = location;
 
 function _makeStyle() {
+    var _bg = '';
     return {
         cssText: '',
-        setProperty: function() {},
+        get backgroundImage() { return _bg; },
+        set backgroundImage(v) {
+            _bg = String(v || '');
+            var m = _bg.match(/url\(\s*["']?([^"')]+)["']?\s*\)/i);
+            if (m && m[1]) __capture(m[1]);
+        },
+        set background(v) {
+            var m = String(v || '').match(/url\(\s*["']?([^"')]+)["']?\s*\)/i);
+            if (m && m[1]) __capture(m[1]);
+        },
+        setProperty: function(k, v) {
+            if (/^background(-image)?$/i.test(k)) {
+                var m = String(v || '').match(/url\(\s*["']?([^"')]+)["']?\s*\)/i);
+                if (m && m[1]) __capture(m[1]);
+            }
+        },
         removeProperty: function() {},
         getPropertyValue: function() { return ''; }
     };
@@ -232,13 +420,25 @@ function _makeStyle() {
 
 var _sharedParent = null;
 
-function _mockEl(tag, isLeaf) {
+function _mockEl(tag, depth) {
+    var d = depth || 0;
+    var canNest = d < 3;
     var el = {
         tagName: String(tag || 'div').toUpperCase(),
         nodeName: String(tag || 'div').toUpperCase(),
         nodeType: 1,
         id: '',
         className: '',
+        name: '',
+        type: '',
+        value: '',
+        checked: true,
+        selected: true,
+        disabled: false,
+        onsubmit: null,   // <-- Tambahan
+        onchange: null,   // <-- Tambahan
+        onfocusin: null,  // <-- Tambahan
+        attributes: {},   // <-- Tambahan
         style: _makeStyle(),
         dataset: {},
         offsetWidth: 800,
@@ -246,8 +446,9 @@ function _mockEl(tag, isLeaf) {
         clientWidth: 800,
         clientHeight: 600,
         classList: { add: function(){}, remove: function(){}, toggle: function(){}, contains: function(){ return false; } },
-        children: [],
-        childNodes: [],
+        get children() { return canNest ? [_mockEl('div', 3)] : []; },
+        get childNodes() { return canNest ? [_mockEl('div', 3)] : []; },
+        get elements() { return canNest ? [_mockEl('input', 3)] : []; },
         _innerHTML: '',
         _src: '',
         get ownerDocument() { return document; },
@@ -255,16 +456,17 @@ function _mockEl(tag, isLeaf) {
         get contentWindow() { return window; },
         get parentNode() { return _sharedParent || el; },
         get parentElement() { return _sharedParent || el; },
-        get previousElementSibling() { return isLeaf ? null : _mockEl('div', true); },
-        get nextElementSibling() { return isLeaf ? null : _mockEl('div', true); },
-        get firstElementChild() { return isLeaf ? null : _mockEl('div', true); },
-        get lastElementChild() { return isLeaf ? null : _mockEl('div', true); },
-        get firstChild() { return isLeaf ? null : _mockEl('div', true); },
-        get lastChild() { return isLeaf ? null : _mockEl('div', true); },
+        get previousElementSibling() { return canNest ? _mockEl('div', d + 1) : null; },
+        get nextElementSibling() { return canNest ? _mockEl('div', d + 1) : null; },
+        get firstElementChild() { return canNest ? _mockEl('div', d + 1) : null; },
+        get lastElementChild() { return canNest ? _mockEl('div', d + 1) : null; },
+        get firstChild() { return canNest ? _mockEl('div', d + 1) : null; },
+        get lastChild() { return canNest ? _mockEl('div', d + 1) : null; },
         get src() { return this._src; },
         set src(v) { this._src = v; __capture(v); },
         set href(v) { __capture(v); },
         set data(v) { __capture(v); },
+        set action(v) { __capture(v); },
         get innerHTML() { return this._innerHTML; },
         set innerHTML(v) { this._innerHTML = v; _extractHtmlUrls(v); },
         get textContent() { return this._innerHTML; },
@@ -274,7 +476,8 @@ function _mockEl(tag, isLeaf) {
         set outerHTML(v) { _extractHtmlUrls(v); },
         insertAdjacentHTML: function(pos, v) { _extractHtmlUrls(v); },
         setAttribute: function(k, v) {
-            if (/^(src|href|data|action)$/i.test(k)) __capture(v);
+            this.attributes[k] = { value: v, expando: false }; // <-- Tambahan
+            if (/^(src|href|data|action|poster)$/i.test(k)) __capture(v);
         },
         getAttribute: function(k) {
             if (k === 'src') return this._src;
@@ -282,26 +485,27 @@ function _mockEl(tag, isLeaf) {
         },
         hasAttribute: function(k) { return k === 'src' && !!this._src; },
         removeAttribute: function() {},
-        appendChild: function(c) { if (c && c._src) __capture(c._src); return c; },
-        insertBefore: function(c) { if (c && c._src) __capture(c._src); return c; },
+        appendChild: function(c) { if (c && c._src) __capture(c._src); return c || _mockEl('div', d + 1); },
+        insertBefore: function(c) { if (c && c._src) __capture(c._src); return c || _mockEl('div', d + 1); },
         removeChild: function(c) { return c; },
         replaceChild: function(c) { return c; },
         remove: function() {},
-        cloneNode: function() { return _mockEl(this.tagName, true); },
-        closest: function() { return _mockEl('div', true); },
+        cloneNode: function() { return _mockEl(this.tagName, d); },
+        closest: function() { return canNest ? _mockEl('div', d + 1) : null; },
         matches: function() { return false; },
         contains: function() { return false; },
         focus: function() {},
         blur: function() {},
         click: function() {},
+        submit: function() {},
         dispatchEvent: function() { return true; },
         getBoundingClientRect: function() { return { width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600 }; },
-        querySelector: function() { return _mockEl('div', true); },
+        querySelector: function() { return canNest ? _mockEl('div', d + 1) : null; },
         querySelectorAll: function() { return []; },
-        getElementsByClassName: function() { return [_mockEl('div', true)]; },
+        getElementsByClassName: function() { return [_mockEl('div', d + 1)]; },
         getElementsByTagName: function(t) {
             if (String(t).toLowerCase() === 'script') return [currentScriptObj];
-            return [_mockEl(t, true)];
+            return canNest ? [_mockEl(t, 3), _mockEl(t, 3)] : [];
         },
         addEventListener: function(ev, fn) {
             if (typeof fn === 'function' && /^(load|DOMContentLoaded)$/i.test(ev)) {
@@ -313,11 +517,13 @@ function _mockEl(tag, isLeaf) {
     return el;
 }
 
-_sharedParent = _mockEl('div', true);
+_sharedParent = _mockEl('div', 3);
+var currentScriptObj = _mockEl('script', 0);
 
-var currentScriptObj = _mockEl('script', false);
-currentScriptObj._src = '__SAFE_SCRIPT_URL__';
-currentScriptObj._innerHTML = '__SAFE_SCRIPT_INNER__';
+function __setCurrentScript(src, inner) {
+    currentScriptObj._src = src || '';
+    currentScriptObj._innerHTML = inner || '';
+}
 
 var document = {
     nodeType: 9,
@@ -354,7 +560,7 @@ var document = {
     querySelectorAll: function() { return []; },
     getElementsByTagName: function(t) {
         if (String(t).toLowerCase() === 'script') return [currentScriptObj];
-        return [_mockEl(t, false)];
+        return [_mockEl(t, 3), _mockEl(t, 3)];
     },
     getElementsByClassName: function() { return [_mockEl('div', false)]; },
     write: function(html) {
@@ -382,30 +588,63 @@ globalThis.document = document;
 function _jqObj() {
     return {
         length: 1,
-        0: _mockEl('div', false),
+        0: _mockEl('div', 0),
         ready: function(fn) { if (typeof fn === 'function') _lifecycleCallbacks.push(fn); return this; },
+        load: function(fn) { if (typeof fn === 'function') _lifecycleCallbacks.push(fn); return this; },
+        bind: function(ev, fn) { if (typeof fn === 'function' && /^(load|ready)$/i.test(ev)) _lifecycleCallbacks.push(fn); return this; },
         on: function(ev, sel, fn) {
             var cb = typeof sel === 'function' ? sel : fn;
             if (typeof cb === 'function' && /^(load|ready)$/i.test(ev)) _lifecycleCallbacks.push(cb);
             return this;
         },
         off: function() { return this; },
+        unbind: function() { return this; },
+        trigger: function() { return this; },
+        resize: function() { return this; },
+        scroll: function() { return this; },
+        click: function() { return this; },
+        change: function() { return this; },
+        submit: function() { return this; },
+        focus: function() { return this; },
+        blur: function() { return this; },
+        hover: function() { return this; },
         each: function() { return this; },
         find: function() { return _jqObj(); },
         children: function() { return _jqObj(); },
         parent: function() { return _jqObj(); },
         closest: function() { return _jqObj(); },
-        attr: function(k, v) { if (v !== undefined && /^(src|href|data)$/i.test(k)) __capture(v); return v !== undefined ? this : ''; },
+        filter: function() { return _jqObj(); },
+        not: function() { return _jqObj(); },
+        eq: function() { return _jqObj(); },
+        first: function() { return _jqObj(); },
+        last: function() { return _jqObj(); },
+        is: function() { return false; },
+        attr: function(k, v) { if (v !== undefined && /^(src|href|data|action)$/i.test(k)) __capture(v); return v !== undefined ? this : ''; },
+        prop: function(k, v) { return v !== undefined ? this : false; },
+        removeAttr: function() { return this; },
         data: function() { return ''; },
+        val: function(v) { return v !== undefined ? this : ''; },
         html: function(v) { if (v !== undefined) _extractHtmlUrls(v); return v !== undefined ? this : ''; },
-        text: function() { return ''; },
+        text: function(v) { return v !== undefined ? this : ''; },
         append: function(v) { _extractHtmlUrls(v); return this; },
         prepend: function(v) { _extractHtmlUrls(v); return this; },
+        empty: function() { return this; },
+        remove: function() { return this; },
         addClass: function() { return this; },
         removeClass: function() { return this; },
-        css: function() { return this; }
+        toggleClass: function() { return this; },
+        hasClass: function() { return false; },
+        css: function() { return this; },
+        show: function() { return this; },
+        hide: function() { return this; },
+        toggle: function() { return this; },
+        width: function() { return 800; },
+        height: function() { return 600; },
+        scrollTop: function() { return 0; },
+        scrollLeft: function() { return 0; }
     };
 }
+
 var jQuery = function(arg) {
     if (typeof arg === 'function') { _lifecycleCallbacks.push(arg); }
     return _jqObj();
@@ -424,11 +663,11 @@ jQuery.fn = {};
 var $ = jQuery;
 
 var navigator = {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     language: 'en-US',
-    languages: ['en-US', 'en'],
+    languages: ['en-US', 'en', 'id'],
     platform: 'Win32',
-    cookieEnabled: true,
+    cookieEnabled: false,
     sendBeacon: function(u) { __capture(u); return true; }
 };
 
@@ -503,44 +742,51 @@ function __triggerLifecycle() {
         $shim = $shim.Replace('__SAFE_ORIGIN__', $safeOrigin)
         $shim = $shim.Replace('__SAFE_PATH__', $safePath)
         $shim = $shim.Replace('__SAFE_SEARCH__', $safeSearch)
-        $shim = $shim.Replace('__SAFE_SCRIPT_URL__', $safeScriptUrl)
-        $shim = $shim.Replace('__SAFE_SCRIPT_INNER__', $safeScriptInner)
 
         try {
             $engine.Execute($shim) | Out-Null
-            foreach ($block in $CodeBlocks) {
-                if (-not [string]::IsNullOrWhiteSpace($block)) {
-                    try {
-                        $engine.Execute($block) | Out-Null
-                    }
-                    catch {
-                        $errors.Add($_.Exception.Message)
-                    }
-                }
-            }
-            try { $engine.Execute("__triggerLifecycle();") | Out-Null } catch { $errors.Add($_.Exception.Message) }
         }
         catch {
             $errors.Add("Shim error: $($_.Exception.Message)")
-        }
-        finally {
             $cts.Dispose()
+            return $null
         }
 
-        return $result
+        return [PSCustomObject]@{
+            Engine   = $engine
+            Captured = $captured
+            Errors   = $errors
+            Cts      = $cts
+            EscapeJs = $escapeJs
+        }
     }
 
-    # Konfigurasi HttpClient tanpa auto-redirect untuk melacak setiap lompatan HTTP
+    # Helper reset constraint kompatibel Jint 4.x & 3.x
+    $resetEngineConstraints = {
+        param($Eng)
+        try { $Eng.ResetConstraints() }
+        catch {
+            try { $Eng.Constraints.Reset() } catch {}
+        }
+    }
+
+    # Konfigurasi HttpClient tanpa cookie, kredensial, maupun auto-redirect
     $handler = [System.Net.Http.HttpClientHandler]::new()
-    $handler.AllowAutoRedirect = $false
+    $handler.AllowAutoRedirect      = $false
+    $handler.UseCookies             = $false
+    $handler.UseDefaultCredentials  = $false
     $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
 
     $client = [System.Net.Http.HttpClient]::new($handler)
     $client.Timeout = [TimeSpan]::FromSeconds(10)
+    $client.MaxResponseContentBufferSize = $maxResponseBytes
     $client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    $client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+    $client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9,id;q=0.8")
 
     $detectedItems = [System.Collections.Generic.List[PSCustomObject]]::new()
     $seenUrls      = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $jsSandbox     = $null
 
     try {
         # ==========================================================
@@ -548,70 +794,109 @@ function __triggerLifecycle() {
         # ==========================================================
         Write-Host "`n[*] Tracing Redirect Chain..." @chaStyle
 
-        $currentUrl  = $target
+        $currentUrl  = $initialUri.AbsoluteUri
         $maxHops     = 10
         $hopCount    = 0
         $finalHtml   = $null
-        $finalUriObj = [System.Uri]$target
+        $finalUriObj = $initialUri
 
         while ($hopCount -lt $maxHops) {
             $hopCount++
-            $response   = $client.GetAsync($currentUrl).GetAwaiter().GetResult()
+            $hopUri = [System.Uri]$currentUrl
+
+            $hopCheck = & $testSafePublicUri $hopUri
+            if (-not $hopCheck.Safe) {
+                Write-Host "    [BLOCKED] $(& $sanitizeText $currentUrl) -> $($hopCheck.Reason)" @penStyle
+                break
+            }
+
+            $response   = $client.GetAsync($hopUri).GetAwaiter().GetResult()
             $statusCode = [int]$response.StatusCode
+            $cleanHop   = & $sanitizeText $currentUrl
 
-            Write-Host "    [$statusCode] $currentUrl" @chaStyle
+            Write-Host "    [$statusCode] $cleanHop" @chaStyle
 
-            if ($seenUrls.Add("Redirect|$currentUrl")) {
+            if ($seenUrls.Add("Redirect|$cleanHop")) {
                 $detectedItems.Add([PSCustomObject]@{
                     Layer       = 'Redirect'
                     Type        = 'Document'
                     Initiator   = if ($hopCount -eq 1) { 'Initial Request' } else { "Hop $($hopCount - 1)" }
-                    DetectedUrl = $currentUrl
+                    DetectedUrl = $cleanHop
                 })
             }
 
             if ($statusCode -in 301, 302, 303, 307, 308 -and $response.Headers.Location) {
                 $nextUri = $response.Headers.Location
                 if (-not $nextUri.IsAbsoluteUri) {
-                    $nextUri = [System.Uri]::new([System.Uri]$currentUrl, $nextUri)
+                    $nextUri = [System.Uri]::new($hopUri, $nextUri)
                 }
                 $currentUrl  = $nextUri.AbsoluteUri
                 $finalUriObj = $nextUri
                 $response.Dispose()
             }
             else {
-                $finalHtml = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                $response.Dispose()
+                try {
+                    $finalHtml = & $readSafeResponseString $response $maxResponseBytes
+                }
+                finally {
+                    $response.Dispose()
+                }
                 break
             }
         }
 
         if ([string]::IsNullOrWhiteSpace($finalHtml)) {
-            Write-Host "Error: Empty response body from target." @penStyle
+            Write-Host "Error: Empty or blocked response body from target." @penStyle
             return
         }
 
         # ==========================================================
-        # TAHAP 2: Ekstraksi Aset Statis dari Dokumen HTML
+        # TAHAP 2: Ekstraksi Aset Statis & Antrean Eksekusi Skrip
         # ==========================================================
         Write-Host "`n[*] Extracting HTML Network Assets..." @chaStyle
 
-        $scriptInnerMap = @{}
-        $extScriptFullPattern = '<script\b[^>]*?\bsrc=["''](?<src>[^"'']+)["''][^>]*>(?<inner>[\s\S]*?)</script>'
-        foreach ($sm in [regex]::Matches($finalHtml, $extScriptFullPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-            $rawSrc   = $sm.Groups['src'].Value.Trim()
-            $innerTxt = $sm.Groups['inner'].Value.Trim()
-            $resU     = $null
-            if ([System.Uri]::TryCreate($finalUriObj, $rawSrc, [ref]$resU)) {
-                if (-not [string]::IsNullOrWhiteSpace($innerTxt)) {
-                    $scriptInnerMap[$resU.AbsoluteUri] = $innerTxt
+        $jsFilesToScan = [System.Collections.Generic.List[string]]::new()
+        $scriptQueue   = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $extScriptCap  = 15
+
+        $allScriptsPattern = '<script\b(?<attrs>[^>]*)>(?<inner>[\s\S]*?)</script>'
+        $allScriptMatches  = [regex]::Matches($finalHtml, $allScriptsPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, $regexTimeout)
+
+        foreach ($sm in $allScriptMatches) {
+            $attrs    = $sm.Groups['attrs'].Value
+            $innerTxt = $sm.Groups['inner'].Value
+
+            if ($attrs -match '(?i)\btype\s*=\s*["''](?:application/(?:ld\+)?json|text/template|text/html)["'']') {
+                continue
+            }
+
+            $srcMatch = [regex]::Match($attrs, '(?i)\bsrc\s*=\s*["''](?<src>[^"'']+)["'']', [System.Text.RegularExpressions.RegexOptions]::None, $regexTimeout)
+            if ($srcMatch.Success) {
+                $rawSrc = $srcMatch.Groups['src'].Value.Trim()
+                $resU   = $null
+                if ([System.Uri]::TryCreate($finalUriObj, $rawSrc, [ref]$resU) -and $resU.Scheme -in 'http', 'https') {
+                    $absSrc = & $sanitizeText $resU.AbsoluteUri
+                    if ($absSrc -notin $jsFilesToScan -and $jsFilesToScan.Count -lt $extScriptCap) {
+                        $jsFilesToScan.Add($absSrc)
+                        $scriptQueue.Add([PSCustomObject]@{
+                            Kind      = 'External'
+                            Url       = $absSrc
+                            InnerCode = $innerTxt.Trim()
+                        })
+                    }
                 }
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($innerTxt)) {
+                $scriptQueue.Add([PSCustomObject]@{
+                    Kind      = 'Inline'
+                    Url       = ''
+                    InnerCode = $innerTxt
+                })
             }
         }
 
-        $jsFilesToScan = [System.Collections.Generic.List[string]]::new()
-        $tagPattern    = '<(?<tag>script|iframe|link|img|source|form)\b[^>]*?(?:src|href|action)=["''](?<val>[^"'']+)["''][^>]*>'
-        $htmlMatches   = [regex]::Matches($finalHtml, $tagPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        $tagPattern  = '<(?<tag>script|iframe|link|img|source|form|object|embed)\b[^>]*?(?:src|href|action|data)=["''](?<val>[^"'']+)["''][^>]*>'
+        $htmlMatches = [regex]::Matches($finalHtml, $tagPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, $regexTimeout)
 
         foreach ($m in $htmlMatches) {
             $tagName = $m.Groups['tag'].Value.ToLower()
@@ -622,7 +907,7 @@ function __triggerLifecycle() {
             $resolvedUri = $null
             if ([System.Uri]::TryCreate($finalUriObj, $rawVal, [ref]$resolvedUri)) {
                 if ($resolvedUri.Scheme -notin 'http', 'https') { continue }
-                $absUrl = $resolvedUri.AbsoluteUri
+                $absUrl = & $sanitizeText $resolvedUri.AbsoluteUri
 
                 $assetType = switch ($tagName) {
                     'script' { 'Script' }
@@ -631,6 +916,8 @@ function __triggerLifecycle() {
                     'img'    { 'Image' }
                     'source' { 'Media' }
                     'form'   { 'FormAction' }
+                    'object' { 'Object' }
+                    'embed'  { 'Embed' }
                     default  { 'Asset' }
                 }
 
@@ -638,121 +925,154 @@ function __triggerLifecycle() {
                     $detectedItems.Add([PSCustomObject]@{
                         Layer       = 'HTML'
                         Type        = $assetType
-                        Initiator   = $finalUriObj.Host
+                        Initiator   = & $sanitizeText $finalUriObj.Host
                         DetectedUrl = $absUrl
                     })
                 }
+            }
+        }
 
-                if ($tagName -eq 'script' -and $absUrl -notin $jsFilesToScan) {
-                    $jsFilesToScan.Add($absUrl)
+        $metaRefreshPattern = '<meta\b[^>]*?http-equiv=["'']refresh["''][^>]*?content=["''][^"'']*?\burl\s*=\s*(?<url>[^"'';\s>]+)'
+        $metaMatches = [regex]::Matches($finalHtml, $metaRefreshPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, $regexTimeout)
+        foreach ($mm in $metaMatches) {
+            $rawMetaUrl = $mm.Groups['url'].Value.Trim()
+            $resMetaUri = $null
+            if ([System.Uri]::TryCreate($finalUriObj, $rawMetaUrl, [ref]$resMetaUri) -and $resMetaUri.Scheme -in 'http', 'https') {
+                $absMeta = & $sanitizeText $resMetaUri.AbsoluteUri
+                if ($seenUrls.Add("HTML|$absMeta")) {
+                    $detectedItems.Add([PSCustomObject]@{
+                        Layer       = 'HTML'
+                        Type        = 'MetaRefresh'
+                        Initiator   = & $sanitizeText $finalUriObj.Host
+                        DetectedUrl = $absMeta
+                    })
                 }
             }
         }
 
         # ==========================================================
-        # TAHAP 3: Pemindaian Statis & Runtime JavaScript (Jint)
+        # TAHAP 3: Pemindaian Statis & Runtime JavaScript Terpadu
         # ==========================================================
-        $engineStatus = if ($hasJint) { "Jint Sandbox Active" } else { "Static Regex Only" }
+        if ($hasJint) {
+            $jsSandbox = & $newJsPageSandbox $finalUriObj
+            if ($null -eq $jsSandbox) { $hasJint = $false }
+        }
+
+        $engineStatus = if ($hasJint) { "Jint Sandbox Active (Hardened)" } else { "Static Regex Only" }
         Write-Host "[*] Scanning JavaScript Endpoints ($($jsFilesToScan.Count) external scripts | $engineStatus)..." @chaStyle
 
-        $jsUrlPattern   = 'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s"'')\]}<>`]*)?'
-        $noisePattern   = '^http://www\.w3\.org/(XML|1999/xlink)'
-        $scriptsSubset  = $jsFilesToScan | Select-Object -First 15
-        $jsRuntimeHits  = 0
-        $allJsErrors    = [System.Collections.Generic.List[string]]::new()
+        $jsUrlPattern  = 'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s"'')\]}<>`]*)?'
+        $noisePattern  = '^http://www\.w3\.org/(XML|1999/xlink)'
+        $jsRuntimeHits = 0
+        $allJsErrors   = [System.Collections.Generic.List[string]]::new()
 
-        # 3A. Evaluasi Seluruh Inline <script> dalam Satu Konteks Halaman Bersama
-        if ($hasJint) {
-            $inlinePattern = '<script(?<attrs>\b(?![^>]*\bsrc=)[^>]*)>(?<code>[\s\S]*?)</script>'
-            $inlineMatches = [regex]::Matches($finalHtml, $inlinePattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-            $inlineBlocks  = [System.Collections.Generic.List[string]]::new()
-
-            foreach ($im in $inlineMatches) {
-                $attrs = $im.Groups['attrs'].Value
-                if ($attrs -match 'type\s*=\s*["'']application/(ld\+)?json["'']') { continue }
-                $inlineBlocks.Add($im.Groups['code'].Value)
+        foreach ($item in $scriptQueue) {
+            if ($item.Kind -eq 'Inline') {
+                if ($hasJint) {
+                    $escInner = & $jsSandbox.EscapeJs $item.InnerCode
+                    try {
+                        & $resetEngineConstraints $jsSandbox.Engine
+                        $jsSandbox.Engine.Execute("__setCurrentScript('', '$escInner');") | Out-Null
+                        $jsSandbox.Engine.Execute($item.InnerCode) | Out-Null
+                    }
+                    catch {
+                        $allJsErrors.Add("[inline] $(& $sanitizeText $_.Exception.Message)")
+                    }
+                }
             }
+            elseif ($item.Kind -eq 'External') {
+                $jsUrl       = $item.Url
+                $jsUriObj    = [System.Uri]$jsUrl
+                $jsInitiator = & $sanitizeText $jsUriObj.Segments[-1]
 
-            if ($inlineBlocks.Count -gt 0) {
-                $sandboxRes = & $invokeJsSandbox $inlineBlocks.ToArray() $finalUriObj "" ""
-                foreach ($err in $sandboxRes.Errors) { $allJsErrors.Add("[inline] $err") }
+                $jsCheck = & $testSafePublicUri $jsUriObj
+                if (-not $jsCheck.Safe) {
+                    $allJsErrors.Add("[$jsInitiator] Diblokir -> $($jsCheck.Reason)")
+                    continue
+                }
 
-                foreach ($rawHit in $sandboxRes.Urls) {
-                    $resolvedDyn = $null
-                    if ([System.Uri]::TryCreate($finalUriObj, $rawHit, [ref]$resolvedDyn)) {
-                        if ($resolvedDyn.Scheme -in 'http', 'https', 'ws', 'wss') {
-                            $absDyn = $resolvedDyn.AbsoluteUri
-                            if ($absDyn -notmatch $noisePattern -and $seenUrls.Add("JSRT|$absDyn")) {
-                                $jsRuntimeHits++
+                try {
+                    $jsResp = $client.GetAsync($jsUriObj).GetAwaiter().GetResult()
+                    try {
+                        if (-not $jsResp.IsSuccessStatusCode) {
+                            $allJsErrors.Add("[$jsInitiator] HTTP $([int]$jsResp.StatusCode)")
+                            continue
+                        }
+                        $jsContent = & $readSafeResponseString $jsResp $maxResponseBytes
+                    }
+                    finally {
+                        $jsResp.Dispose()
+                    }
+
+                    if ($hasJint -and -not [string]::IsNullOrWhiteSpace($jsContent)) {
+                        $escSrc   = & $jsSandbox.EscapeJs $jsUrl
+                        $escInner = & $jsSandbox.EscapeJs $item.InnerCode
+                        try {
+                            & $resetEngineConstraints $jsSandbox.Engine
+                            $jsSandbox.Engine.Execute("__setCurrentScript('$escSrc', '$escInner');") | Out-Null
+                            $jsSandbox.Engine.Execute($jsContent) | Out-Null
+                        }
+                        catch {
+                            $allJsErrors.Add("[$jsInitiator] $(& $sanitizeText $_.Exception.Message)")
+                        }
+                    }
+
+                    $jsMatches = [regex]::Matches($jsContent, $jsUrlPattern, [System.Text.RegularExpressions.RegexOptions]::None, $regexTimeout)
+                    foreach ($jm in $jsMatches) {
+                        $foundEndpoint = & $sanitizeText ($jm.Value.TrimEnd('.', ',', ';'))
+                        if ($foundEndpoint -match $noisePattern) { continue }
+
+                        $checkUri = $null
+                        if ([System.Uri]::TryCreate($foundEndpoint, [System.UriKind]::Absolute, [ref]$checkUri)) {
+                            if ($seenUrls.Add("JS|$foundEndpoint")) {
                                 $detectedItems.Add([PSCustomObject]@{
-                                    Layer       = 'JS-Runtime'
-                                    Type        = 'DynamicEndpoint'
-                                    Initiator   = "$($finalUriObj.Host) (inline)"
-                                    DetectedUrl = $absDyn
+                                    Layer       = 'JS-Scan'
+                                    Type        = 'Endpoint'
+                                    Initiator   = $jsInitiator
+                                    DetectedUrl = $foundEndpoint
                                 })
                             }
                         }
                     }
                 }
+                catch {
+                    $allJsErrors.Add("[$jsInitiator] Fetch/Read error: $(& $sanitizeText $_.Exception.Message)")
+                    continue
+                }
             }
         }
 
-        # 3B. Pemindaian File JS Eksternal (Static Regex + Jint Runtime)
-        foreach ($jsUrl in $scriptsSubset) {
+        if ($hasJint) {
             try {
-                $jsContent   = $client.GetStringAsync($jsUrl).GetAwaiter().GetResult()
-                $jsInitiator = ([System.Uri]$jsUrl).Segments[-1]
-                $innerCfg    = if ($scriptInnerMap.ContainsKey($jsUrl)) { $scriptInnerMap[$jsUrl] } else { "" }
+                & $resetEngineConstraints $jsSandbox.Engine
+                $jsSandbox.Engine.Execute("__triggerLifecycle();") | Out-Null
+            }
+            catch {
+                $allJsErrors.Add("[lifecycle] $(& $sanitizeText $_.Exception.Message)")
+            }
 
-                if ($hasJint) {
-                    $sandboxRes = & $invokeJsSandbox @($jsContent) $finalUriObj $jsUrl $innerCfg
-                    foreach ($err in $sandboxRes.Errors) { $allJsErrors.Add("[$jsInitiator] $err") }
-
-                    foreach ($rawHit in $sandboxRes.Urls) {
-                        $resolvedDyn = $null
-                        if ([System.Uri]::TryCreate($finalUriObj, $rawHit, [ref]$resolvedDyn)) {
-                            if ($resolvedDyn.Scheme -in 'http', 'https', 'ws', 'wss') {
-                                $absDyn = $resolvedDyn.AbsoluteUri
-                                if ($absDyn -notmatch $noisePattern -and $seenUrls.Add("JSRT|$absDyn")) {
-                                    $jsRuntimeHits++
-                                    $detectedItems.Add([PSCustomObject]@{
-                                        Layer       = 'JS-Runtime'
-                                        Type        = 'DynamicEndpoint'
-                                        Initiator   = $jsInitiator
-                                        DetectedUrl = $absDyn
-                                    })
-                                }
-                            }
-                        }
-                    }
-                }
-
-                $jsMatches = [regex]::Matches($jsContent, $jsUrlPattern)
-                foreach ($jm in $jsMatches) {
-                    $foundEndpoint = $jm.Value.TrimEnd('.', ',', ';')
-                    if ($foundEndpoint -match $noisePattern) { continue }
-
-                    $checkUri = $null
-                    if ([System.Uri]::TryCreate($foundEndpoint, [System.UriKind]::Absolute, [ref]$checkUri)) {
-                        if ($seenUrls.Add("JS|$foundEndpoint")) {
+            foreach ($rawHit in $jsSandbox.Captured) {
+                $resolvedDyn = $null
+                if ([System.Uri]::TryCreate($finalUriObj, $rawHit, [ref]$resolvedDyn)) {
+                    if ($resolvedDyn.Scheme -in 'http', 'https', 'ws', 'wss') {
+                        $absDyn = & $sanitizeText $resolvedDyn.AbsoluteUri
+                        if ($absDyn -notmatch $noisePattern -and $seenUrls.Add("JSRT|$absDyn")) {
+                            $jsRuntimeHits++
                             $detectedItems.Add([PSCustomObject]@{
-                                Layer       = 'JS-Scan'
-                                Type        = 'Endpoint'
-                                Initiator   = $jsInitiator
-                                DetectedUrl = $foundEndpoint
+                                Layer       = 'JS-Runtime'
+                                Type        = 'DynamicEndpoint'
+                                Initiator   = & $sanitizeText "$($finalUriObj.Host) (DOM/JS)"
+                                DetectedUrl = $absDyn
                             })
                         }
                     }
                 }
             }
-            catch {
-                continue
-            }
         }
 
-        if ($hasJint -and $jsRuntimeHits -eq 0 -and $allJsErrors.Count -gt 0) {
-            foreach ($diag in ($allJsErrors | Select-Object -Unique -First 3)) {
-                Write-Host "    [i] Jint diagnostic: $diag" @chaStyle
+        if ($allJsErrors.Count -gt 0) {
+            foreach ($diag in ($allJsErrors | Select-Object -Unique -First 5)) {
+                Write-Host "    [i] Diagnostic: $diag" @chaStyle
             }
         }
 
@@ -763,9 +1083,12 @@ function __triggerLifecycle() {
         $detectedItems | Format-Table -Property Layer, Type, Initiator, DetectedUrl -AutoSize
     }
     catch {
-        Write-Host "Error tracing URL '$target': $($_.Exception.Message)" @penStyle
+        Write-Host "Error tracing URL '$(& $sanitizeText $target)': $(& $sanitizeText $_.Exception.Message)" @penStyle
     }
     finally {
+        if ($null -ne $jsSandbox -and $null -ne $jsSandbox.Cts) {
+            $jsSandbox.Cts.Dispose()
+        }
         $client.Dispose()
         $handler.Dispose()
     }
