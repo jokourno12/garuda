@@ -14,6 +14,17 @@ function url {
     $maxResponseBytes = 5 * 1024 * 1024 # Maksimal 5 MB per dokumen/skrip (anti zip-bomb)
     $regexTimeout     = [TimeSpan]::FromSeconds(2)
 
+    # Helper: Ekstrak pesan error terdalam (membuka pembungkus AggregateException / HttpRequestException)
+    $getRootErrorMessage = {
+        param([System.Exception]$Exception)
+        if ($null -eq $Exception) { return "Unknown error" }
+        $curr = $Exception
+        while ($null -ne $curr.InnerException) {
+            $curr = $curr.InnerException
+        }
+        return $curr.Message
+    }
+
     # Helper: Validasi URI, Resolusi DNS & Cegah SSRF ke jaringan lokal/privat
     $testSafePublicUri = {
         param([System.Uri]$Uri)
@@ -71,7 +82,7 @@ function url {
             return [PSCustomObject]@{ Safe = $true; Reason = "OK" }
         }
         catch {
-            $dnsErr = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+            $dnsErr = & $getRootErrorMessage $_.Exception
             return [PSCustomObject]@{ Safe = $false; Reason = "Gagal resolusi DNS / Domain mati ($dnsErr)" }
         }
     }
@@ -196,7 +207,7 @@ function url {
             try { $opts = $opts.AllowClr($false) } catch {}
         }
 
-        # Jint 4.x: Cari extension method publik pada static class di Jint.dll (termasuk Jint.Constraints.OptionsExtensions)
+        # Jint 4.x: Cari extension method publik pada static class di Jint.dll
         $jintAsm   = [Jint.Engine].Assembly
         $jintTypes = try { $jintAsm.GetTypes() } catch [System.Reflection.ReflectionTypeLoadException] { $_.Exception.Types | Where-Object { $null -ne $_ } }
 
@@ -435,10 +446,10 @@ function _mockEl(tag, depth) {
         checked: true,
         selected: true,
         disabled: false,
-        onsubmit: null,   // <-- Tambahan
-        onchange: null,   // <-- Tambahan
-        onfocusin: null,  // <-- Tambahan
-        attributes: {},   // <-- Tambahan
+        onsubmit: null,
+        onchange: null,
+        onfocusin: null,
+        attributes: {},
         style: _makeStyle(),
         dataset: {},
         offsetWidth: 800,
@@ -476,7 +487,7 @@ function _mockEl(tag, depth) {
         set outerHTML(v) { _extractHtmlUrls(v); },
         insertAdjacentHTML: function(pos, v) { _extractHtmlUrls(v); },
         setAttribute: function(k, v) {
-            this.attributes[k] = { value: v, expando: false }; // <-- Tambahan
+            this.attributes[k] = { value: v, expando: false };
             if (/^(src|href|data|action|poster)$/i.test(k)) __capture(v);
         },
         getAttribute: function(k) {
@@ -770,12 +781,17 @@ function __triggerLifecycle() {
         }
     }
 
-    # Konfigurasi HttpClient tanpa cookie, kredensial, maupun auto-redirect
+    # Konfigurasi HttpClient tanpa cookie, kredensial, auto-redirect, serta mengizinkan observasi sertifikat bermasalah
     $handler = [System.Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect      = $false
     $handler.UseCookies             = $false
     $handler.UseDefaultCredentials  = $false
     $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+
+    $validatorProp = [System.Net.Http.HttpClientHandler].GetProperty('DangerousAcceptAnyServerCertificateValidator')
+    if ($null -ne $validatorProp) {
+        $handler.ServerCertificateCustomValidationCallback = $validatorProp.GetValue($null)
+    }
 
     $client = [System.Net.Http.HttpClient]::new($handler)
     $client.Timeout = [TimeSpan]::FromSeconds(10)
@@ -789,6 +805,69 @@ function __triggerLifecycle() {
     $jsSandbox     = $null
 
     try {
+        # ==========================================================
+        # TAHAP 0: Observasi Cepat Sertifikat TLS (Jika Target HTTPS)
+        # ==========================================================
+        if ($initialUri.Scheme -eq 'https') {
+            $tlsPort = if ($initialUri.Port -gt 0) { $initialUri.Port } else { 443 }
+            $tcpClient = [System.Net.Sockets.TcpClient]::new()
+            try {
+                $connTask = $tcpClient.ConnectAsync($initialUri.DnsSafeHost, $tlsPort)
+                if ($connTask.Wait(3500) -and $tcpClient.Connected) {
+                    $netStream = $tcpClient.GetStream()
+                    $netStream.ReadTimeout  = 3500
+                    $netStream.WriteTimeout = 3500
+
+                    $tlsRecord = @{
+                        HasCert      = $false
+                        Subject      = ""
+                        PolicyErrors = "None"
+                        IsSelfSigned = $false
+                    }
+
+                    $certCallback = [System.Net.Security.RemoteCertificateValidationCallback]{
+                        param($sender, $cert, $chain, $sslPolicyErrors)
+                        if ($null -ne $cert) {
+                            $x509 = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert)
+                            $tlsRecord.HasCert      = $true
+                            $tlsRecord.Subject      = $x509.Subject
+                            $tlsRecord.PolicyErrors = $sslPolicyErrors.ToString()
+                            $tlsRecord.IsSelfSigned = [string]::Equals($x509.Subject, $x509.Issuer, [System.StringComparison]::OrdinalIgnoreCase)
+                            $x509.Dispose()
+                        }
+                        return $true
+                    }
+
+                    $sslStream = [System.Net.Security.SslStream]::new($netStream, $false, $certCallback)
+                    try {
+                        $sslStream.AuthenticateAsClient($initialUri.DnsSafeHost)
+                        if ($tlsRecord.HasCert -and ($tlsRecord.IsSelfSigned -or $tlsRecord.PolicyErrors -ne 'None')) {
+                            $certNote = if ($tlsRecord.IsSelfSigned) { "Self-Signed" } else { $tlsRecord.PolicyErrors }
+                            $cleanSubj = & $sanitizeText $tlsRecord.Subject
+                            $cleanHost = & $sanitizeText $initialUri.Host
+                            Write-Host "    [!] TLS Certificate Warning ($cleanHost): $certNote [$cleanSubj]" @penStyle
+                            if ($seenUrls.Add("TLS|$cleanHost|$certNote")) {
+                                $detectedItems.Add([PSCustomObject]@{
+                                    Layer       = 'TLS'
+                                    Type        = 'CertWarning'
+                                    Initiator   = $cleanHost
+                                    DetectedUrl = "$certNote ($cleanSubj)"
+                                })
+                            }
+                        }
+                    }
+                    catch {}
+                    finally {
+                        $sslStream.Dispose()
+                    }
+                }
+            }
+            catch {}
+            finally {
+                $tcpClient.Dispose()
+            }
+        }
+
         # ==========================================================
         # TAHAP 1: Pelacakan Rantai Redirect (Redirect Chain)
         # ==========================================================
@@ -810,7 +889,36 @@ function __triggerLifecycle() {
                 break
             }
 
-            $response   = $client.GetAsync($hopUri).GetAwaiter().GetResult()
+            $response = $null
+            try {
+                $response = $client.GetAsync($hopUri).GetAwaiter().GetResult()
+            }
+            catch {
+                $rootErr = & $getRootErrorMessage $_.Exception
+                # Auto-fallback ke HTTP jika Hop 1 gagal terhubung via HTTPS (misal port 443 mati / TLS ditolak)
+                if ($hopCount -eq 1 -and $hopUri.Scheme -eq 'https') {
+                    Write-Host "    [!] HTTPS failed ($(& $sanitizeText $rootErr)) -> Falling back to HTTP..." @penStyle
+                    $uriBuilder = [System.UriBuilder]::new($hopUri)
+                    $uriBuilder.Scheme = 'http'
+                    if ($uriBuilder.Port -eq 443) { $uriBuilder.Port = -1 }
+
+                    $fallbackUri   = $uriBuilder.Uri
+                    $fallbackCheck = & $testSafePublicUri $fallbackUri
+                    if (-not $fallbackCheck.Safe) {
+                        Write-Host "    [BLOCKED] $(& $sanitizeText $fallbackUri.AbsoluteUri) -> $($fallbackCheck.Reason)" @penStyle
+                        break
+                    }
+
+                    $currentUrl  = $fallbackUri.AbsoluteUri
+                    $finalUriObj = $fallbackUri
+                    $hopUri      = $fallbackUri
+                    $response    = $client.GetAsync($hopUri).GetAwaiter().GetResult()
+                }
+                else {
+                    throw
+                }
+            }
+
             $statusCode = [int]$response.StatusCode
             $cleanHop   = & $sanitizeText $currentUrl
 
@@ -835,6 +943,42 @@ function __triggerLifecycle() {
                 $response.Dispose()
             }
             else {
+                $mediaType = if ($response.Content.Headers.ContentType -and $response.Content.Headers.ContentType.MediaType) {
+                    $response.Content.Headers.ContentType.MediaType.ToLowerInvariant()
+                }
+                else {
+                    ""
+                }
+
+                # Deteksi jika server langsung melemparkan file biner/unduhan alih-alih dokumen web
+                $isNonHtmlBinary = ($mediaType -ne "") -and (
+                    $mediaType -notmatch '^(text/|application/(xhtml\+xml|xml|json|javascript|x-javascript))'
+                )
+
+                if ($isNonHtmlBinary) {
+                    try {
+                        $contentLen = if ($null -ne $response.Content.Headers.ContentLength) { "$($response.Content.Headers.ContentLength) bytes" } else { "unknown size" }
+                        $cleanMedia = & $sanitizeText $mediaType
+                        Write-Host "    [!] Non-HTML Payload Detected: $cleanMedia ($contentLen)" @penStyle
+
+                        if ($seenUrls.Add("Payload|$cleanHop")) {
+                            $detectedItems.Add([PSCustomObject]@{
+                                Layer       = 'Payload'
+                                Type        = "File ($cleanMedia)"
+                                Initiator   = & $sanitizeText $finalUriObj.Host
+                                DetectedUrl = $cleanHop
+                            })
+                        }
+
+                        Write-Host "`n[+] Total Unique Network URLs Detected: $($detectedItems.Count)" @chaStyle
+                        $detectedItems | Format-Table -Property Layer, Type, Initiator, DetectedUrl -AutoSize
+                        return
+                    }
+                    finally {
+                        $response.Dispose()
+                    }
+                }
+
                 try {
                     $finalHtml = & $readSafeResponseString $response $maxResponseBytes
                 }
@@ -846,7 +990,13 @@ function __triggerLifecycle() {
         }
 
         if ([string]::IsNullOrWhiteSpace($finalHtml)) {
-            Write-Host "Error: Empty or blocked response body from target." @penStyle
+            if ($detectedItems.Count -gt 0) {
+                Write-Host "`n[+] Total Unique Network URLs Detected: $($detectedItems.Count)" @chaStyle
+                $detectedItems | Format-Table -Property Layer, Type, Initiator, DetectedUrl -AutoSize
+            }
+            else {
+                Write-Host "Error: Empty or blocked response body from target." @penStyle
+            }
             return
         }
 
@@ -1036,7 +1186,7 @@ function __triggerLifecycle() {
                     }
                 }
                 catch {
-                    $allJsErrors.Add("[$jsInitiator] Fetch/Read error: $(& $sanitizeText $_.Exception.Message)")
+                    $allJsErrors.Add("[$jsInitiator] Fetch/Read error: $(& $sanitizeText (& $getRootErrorMessage $_.Exception))")
                     continue
                 }
             }
@@ -1083,7 +1233,8 @@ function __triggerLifecycle() {
         $detectedItems | Format-Table -Property Layer, Type, Initiator, DetectedUrl -AutoSize
     }
     catch {
-        Write-Host "Error tracing URL '$(& $sanitizeText $target)': $(& $sanitizeText $_.Exception.Message)" @penStyle
+        $rootMsg = & $getRootErrorMessage $_.Exception
+        Write-Host "Error tracing URL '$(& $sanitizeText $target)': $(& $sanitizeText $rootMsg)" @penStyle
     }
     finally {
         if ($null -ne $jsSandbox -and $null -ne $jsSandbox.Cts) {
