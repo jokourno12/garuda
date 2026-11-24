@@ -70,7 +70,7 @@ function ip{
     }
 
     # Cache lokal per IP + rentang hari untuk menghemat kuota API harian
-    $cacheDir  = Join-Path $env:TEMP "garuda_abuseipdb_cache"
+    $cacheDir = Join-Path ([System.IO.Path]::GetTempPath()) "garuda_abuseipdb_cache"
     if (-not (Test-Path $cacheDir)) {
         New-Item -Path $cacheDir -ItemType Directory -Force | Out-Null
     }
@@ -145,8 +145,18 @@ function ip{
 
     # Hitung ringkasan kategori dari riwayat laporan (jika tersedia)
     $catCounts = @{}
+    $sortedReports = @()
     if ($data.reports) {
-        foreach ($rep in $data.reports) {
+        $sortedReports = @($data.reports | Sort-Object {
+            $dt = [DateTime]::MinValue
+            if ([DateTime]::TryParse([string]$_.reportedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$dt)) {
+                $dt
+            } else {
+                [DateTime]::MinValue
+            }
+        } -Descending)
+
+        foreach ($rep in $sortedReports) {
             if ($rep.categories) {
                 foreach ($cId in $rep.categories) {
                     $idInt = [int]$cId
@@ -167,21 +177,23 @@ function ip{
         "None recorded"
     }
 
-    $scoreVal     = [int]$data.abuseConfidenceScore
-    $totalRepVal  = [int]$data.totalReports
-    $distinctRep  = if ($data.numDistinctUsers) { [int]$data.numDistinctUsers } else { 0 }
-    $ispClean     = & $sanitizeText ([string]$data.isp)
-    $usageClean   = & $sanitizeText ([string]$data.usageType)
-    $countryClean = & $sanitizeText ([string]$data.countryCode)
-    $lastRepClean = if ($data.lastReportedAt) { & $sanitizeText ([string]$data.lastReportedAt) } else { "Never" }
-    $scoreStyle   = if ($scoreVal -ge 80) { $penStyle } else { $chaStyle }
+    $scoreVal      = [int]$data.abuseConfidenceScore
+    $totalRepVal   = [int]$data.totalReports
+    $distinctRep   = if ($data.numDistinctUsers) { [int]$data.numDistinctUsers } else { 0 }
+    $isWhitelisted = [bool]$data.isWhitelisted
+    $ispClean      = & $sanitizeText ([string]$data.isp)
+    $usageClean    = & $sanitizeText ([string]$data.usageType)
+    $countryClean  = & $sanitizeText ([string]$data.countryCode)
+    $lastRepClean  = if ($data.lastReportedAt) { & $sanitizeText ([string]$data.lastReportedAt) } else { "Never" }
+    $scoreStyle    = if ($scoreVal -ge 80 -and -not $isWhitelisted) { $penStyle } else { $chaStyle }
 
     Write-Host "`n[*] Checking AbuseIPDB Reputation (${MaxAgeInDays}d | Cache: $cacheStatus)..." @chaStyle
     Write-Host "    Confidence Score : $scoreVal% ($totalRepVal reports | $distinctRep reporters)" @scoreStyle
     Write-Host "    Top Categories   : $(& $sanitizeText $topCats)" @chaStyle
     Write-Host "    ISP / Usage      : $ispClean ($usageClean) [$countryClean]" @chaStyle
-    Write-Host "    Last Reported    : $lastRepClean" @chaStyle
+    Write-Host "    Last Reported    : $lastRepClean$(if ($isWhitelisted) { ' [WHITELISTED]' })" @chaStyle
 
+    # Pisahkan ringkasan metrik dan log detail agar Total Indicators tidak double-counting
     $summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
     $summaryRows.Add([PSCustomObject]@{
         Source    = 'AbuseIPDB'
@@ -189,8 +201,9 @@ function ip{
         Indicator = "$totalRepVal reports | $topCats"
     })
 
-    if ($data.reports) {
-        foreach ($rep in ($data.reports | Select-Object -First 5)) {
+    $reportLogCount = 0
+    if ($sortedReports.Count -gt 0) {
+        foreach ($rep in ($sortedReports | Select-Object -First 5)) {
             $repNames = if ($rep.categories) {
                 ($rep.categories | ForEach-Object {
                     $k = [int]$_
@@ -204,14 +217,15 @@ function ip{
                 Detail    = $repTime
                 Indicator = & $sanitizeText $repNames
             })
+            $reportLogCount++
         }
     }
 
-    Write-Host "`n[+] Total Indicators Recorded: $($summaryRows.Count)" @chaStyle
+    Write-Host "`n[+] Total Reports Recorded: $totalRepVal (Showing $reportLogCount recent logs)" @chaStyle
     $summaryRows | Format-Table -Property Source, Detail, Indicator -AutoSize
 
     # ==========================================================
-    # Konklusi Dinamis Satu Paragraf
+    # Konklusi Dinamis Satu Paragraf (Matriks Risiko 2 Dimensi)
     # ==========================================================
     $affiliationPart = if (-not [string]::IsNullOrWhiteSpace($ispClean) -and -not [string]::IsNullOrWhiteSpace($usageClean)) {
         "yang terafiliasi dengan $ispClean ($usageClean) "
@@ -240,19 +254,18 @@ function ip{
             "rendah"
         }
 
-        $reportLogRows = @($summaryRows | Where-Object { $_.Source -eq 'ReportLog' })
-        $parsedDates   = [System.Collections.Generic.List[DateTime]]::new()
-        $rawDateTokens = [System.Collections.Generic.List[string]]::new()
-
-        foreach ($logRow in $reportLogRows) {
-            if (-not [string]::IsNullOrWhiteSpace($logRow.Detail)) {
-                $dtOut = [DateTime]::MinValue
-                if ([DateTime]::TryParse($logRow.Detail, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$dtOut)) {
-                    $parsedDates.Add($dtOut)
-                }
-                else {
-                    $rawDateTokens.Add(($logRow.Detail -split '\s+')[0])
-                }
+        # Sinkronkan rentang waktu dari ReportLog dan field lastReportedAt
+        $parsedDates = [System.Collections.Generic.List[DateTime]]::new()
+        foreach ($logRow in ($summaryRows | Where-Object { $_.Source -eq 'ReportLog' })) {
+            $dtOut = [DateTime]::MinValue
+            if ([DateTime]::TryParse($logRow.Detail, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$dtOut)) {
+                $parsedDates.Add($dtOut)
+            }
+        }
+        if ($data.lastReportedAt) {
+            $dtLast = [DateTime]::MinValue
+            if ([DateTime]::TryParse([string]$data.lastReportedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$dtLast)) {
+                $parsedDates.Add($dtLast)
             }
         }
 
@@ -267,14 +280,6 @@ function ip{
                 "yang tercatat aktif sejak $earliestStr hingga $latestStr"
             }
         }
-        elseif ($rawDateTokens.Count -gt 0) {
-            if ($rawDateTokens[0] -eq $rawDateTokens[-1]) {
-                "yang tercatat aktif pada $($rawDateTokens[0])"
-            }
-            else {
-                "yang tercatat aktif sejak $($rawDateTokens[-1]) hingga $($rawDateTokens[0])"
-            }
-        }
         elseif ($lastRepClean -ne 'Never') {
             "dengan laporan terakhir tercatat pada $lastRepClean"
         }
@@ -282,51 +287,60 @@ function ip{
             "dalam $MaxAgeInDays hari terakhir"
         }
 
+        # Susun ringkasan kategori aktivitas dengan diksi proporsional
         $uniqueActivities = [System.Collections.Generic.List[string]]::new()
-        if ($catCounts.Count -gt 0) {
-            foreach ($entry in ($catCounts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 3)) {
-                $catTitle = if ($categoryMap.ContainsKey($entry.Key)) { $categoryMap[$entry.Key] } else { "Cat $($entry.Key)" }
-                if (-not $uniqueActivities.Contains($catTitle)) {
-                    $uniqueActivities.Add($catTitle)
-                }
-            }
-        }
-        foreach ($logRow in $reportLogRows) {
-            if (-not [string]::IsNullOrWhiteSpace($logRow.Indicator) -and $logRow.Indicator -ne 'Uncategorized') {
-                foreach ($actName in ($logRow.Indicator -split ',\s*')) {
-                    $trimmedAct = $actName.Trim()
-                    if (-not [string]::IsNullOrWhiteSpace($trimmedAct) -and -not $uniqueActivities.Contains($trimmedAct)) {
-                        $uniqueActivities.Add($trimmedAct)
-                    }
-                }
+        foreach ($entry in ($catCounts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 3)) {
+            $catTitle = if ($categoryMap.ContainsKey($entry.Key)) { $categoryMap[$entry.Key] } else { "Cat $($entry.Key)" }
+            if (-not $uniqueActivities.Contains($catTitle)) {
+                $uniqueActivities.Add($catTitle)
             }
         }
 
+        $activityPrefix = if ($totalRepVal -le 1) { "tercatat aktivitas" } else { "didominasi aktivitas" }
         $activitySummaryText = if ($uniqueActivities.Count -eq 1) {
-            "didominasi aktivitas $($uniqueActivities[0])"
+            "$activityPrefix $($uniqueActivities[0])"
         }
         elseif ($uniqueActivities.Count -eq 2) {
-            "didominasi aktivitas $($uniqueActivities[0]) serta $($uniqueActivities[1])"
+            "$activityPrefix $($uniqueActivities[0]) serta $($uniqueActivities[1])"
         }
         elseif ($uniqueActivities.Count -gt 2) {
             $leadingActivities = ($uniqueActivities[0..($uniqueActivities.Count - 2)] -join ', ')
-            "didominasi aktivitas $leadingActivities, serta $($uniqueActivities[-1])"
+            "$activityPrefix $leadingActivities, serta $($uniqueActivities[-1])"
         }
         else {
             "dengan catatan laporan aktivitas mencurigakan"
         }
 
-        $mitigationText = if ($usageClean -match 'Fixed Line ISP|Mobile ISP|ISP') {
-            "sehingga karena berasal dari jaringan ISP residensial/satelit yang umumnya berbagi IP dinamis (CGNAT), mitigasi yang disarankan adalah menerapkan rate-limiting atau temporary ban pada layanan terdampak dibandingkan pemblokiran permanen."
+        # Matriks Mitigasi: Kombinasi Whitelist + Confidence Score + Usage Type
+        $isProtectedInfra = $isWhitelisted -or ($usageClean -match 'Content Delivery Network|Search Engine|Reserved') -or ($ispClean -match 'Fortinet|Cloudflare|Google|Akamai|Quad9|Microsoft')
+        $isDedicatedInfra = $usageClean -match 'Data Center|Web Hosting|Transit|Commercial'
+        $isDynamicIsp     = $usageClean -match 'Fixed Line ISP|Mobile ISP|ISP'
+
+        $mitigationText = if ($isProtectedInfra) {
+            "sehingga karena teridentifikasi sebagai infrastruktur layanan tepercaya/CDN atau masuk daftar putih (whitelisted), disarankan untuk memverifikasi konteks lalu lintas internal terlebih dahulu dan menghindari pemblokiran otomatis agar tidak mengganggu layanan sah."
         }
-        elseif ($usageClean -match 'Data Center|Web Hosting|Transit|Commercial') {
-            "sehingga karena berasal dari infrastruktur server/hosting terdedikasi, mitigasi yang disarankan adalah menerapkan pemblokiran permanen pada firewall atau WAF serta memperketat pemantauan log akses."
+        elseif ($scoreVal -lt 25) {
+            "sehingga karena tingkat kepercayaan masih rendah (di bawah ambang batas blokir), mitigasi yang disarankan cukup berupa pemantauan log (log & monitor) tanpa perlu menerapkan pemblokiran pada firewall maupun WAF."
         }
-        elseif ($usageClean -match 'Content Delivery Network|Search Engine|Reserved') {
-            "sehingga karena teridentifikasi sebagai infrastruktur layanan pihak ketiga/CDN khusus, disarankan memverifikasi keabsahan lalu lintas sebelum menerapkan pembatasan akses agar tidak memutus layanan sah."
+        elseif ($scoreVal -lt 80) {
+            if ($isDedicatedInfra) {
+                "sehingga karena berasal dari infrastruktur server/hosting dengan tingkat risiko sedang, mitigasi yang disarankan adalah menerapkan rate-limiting atau pemblokiran sementara (temporary block) sambil memantau anomali akses lanjutan."
+            }
+            else {
+                "sehingga dengan tingkat risiko sedang pada jaringan dinamis/umum, mitigasi yang disarankan adalah menerapkan rate-limiting atau tantangan verifikasi (WAF challenge) dibandingkan pemblokiran permanen."
+            }
         }
         else {
-            "sehingga mitigasi yang disarankan adalah menerapkan pembatasan akses (rate-limiting atau pemblokiran sementara) serta pemantauan ketat pada layanan terdampak."
+            # Score >= 80 (High Risk)
+            if ($isDynamicIsp) {
+                "sehingga meskipun berskor risiko tinggi, karena berasal dari jaringan ISP yang umumnya berbagi IP dinamis (CGNAT), mitigasi yang disarankan adalah menerapkan pemblokiran sementara (temporary ban) dan rate-limiting ketat pada layanan terdampak."
+            }
+            elseif ($isDedicatedInfra) {
+                "sehingga karena berskor risiko tinggi dan berasal dari infrastruktur server/hosting terdedikasi, mitigasi yang disarankan adalah menerapkan pemblokiran permanen pada firewall atau WAF serta memperketat pemantauan log akses."
+            }
+            else {
+                "sehingga karena berskor risiko tinggi, mitigasi yang disarankan adalah menerapkan pemblokiran akses pada perimeter keamanan serta mengaudit log koneksi terkait."
+            }
         }
 
         $conclusionParagraph = "Alamat IP $cleanIp ${affiliationPart}berada pada tingkat risiko $riskLevelText dengan skor kepercayaan $scoreVal% dari $totalRepVal laporan $activityWindowText, $activitySummaryText, $mitigationText"
