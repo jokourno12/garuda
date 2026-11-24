@@ -43,7 +43,7 @@ function hash {
     $summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     # Cache lokal per hash untuk menghemat kuota API VirusTotal
-    $vtCacheDir = Join-Path $env:TEMP "garuda_vt_hash_cache"
+    $vtCacheDir = Join-Path ([System.IO.Path]::GetTempPath()) "garuda_vt_hash_cache"
     if (-not (Test-Path $vtCacheDir)) {
         New-Item -Path $vtCacheDir -ItemType Directory -Force | Out-Null
     }
