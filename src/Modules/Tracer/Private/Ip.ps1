@@ -70,7 +70,7 @@ function ip{
     }
 
     # Cache lokal per IP + rentang hari untuk menghemat kuota API harian
-    $cacheDir  = Join-Path $env:TEMP "garuda_abuseipdb_cache"
+    $cacheDir = Join-Path ([System.IO.Path]::GetTempPath()) "garuda_abuseipdb_cache"
     if (-not (Test-Path $cacheDir)) {
         New-Item -Path $cacheDir -ItemType Directory -Force | Out-Null
     }
