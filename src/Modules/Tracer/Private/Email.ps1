@@ -786,4 +786,131 @@ function email {
     else {
         Write-Host "    Status  : Clean (0 breaches found)" @Cha
     }
+
+    # ==========================================================
+    # Konklusi Dinamis Satu Paragraf (Matriks Risiko Multi-Dimensi)
+    # ==========================================================
+    $cleanEmail    = $target.Trim().ToLower()
+    $isDisposable  = ($contact.ProviderType -eq 'Disposable / Burner Email')
+    $isRoleBased   = ($contact.AccountRole -eq 'Role-Based')
+    $isCompromised = ($cavalierResult.Status -eq 'Compromised')
+    $isIntelxHit   = ($intelxResult.Status -eq 'Exposed')
+    $isBreached    = ($result.Status -eq 'Exposed')
+    $hasThreatHit  = ($isCompromised -or $isIntelxHit -or $isBreached)
+    $weakDnsAuth   = ($net.HasMX -and ($net.SPF -match 'Missing|Weak' -or $net.DMARC -match 'Missing|p=none'))
+
+    $osintFootprint = @()
+    if ($contact.Gravatar.Found) { $osintFootprint += 'profil publik Gravatar' }
+    if ($contact.PGP.Found) { $osintFootprint += 'kunci publik OpenPGP' }
+    $osintText = if ($osintFootprint.Count -gt 0) {
+        "dengan jejak identitas publik berupa $($osintFootprint -join ' dan ') "
+    }
+    else {
+        ""
+    }
+
+    $infraDesc = if (-not $net.HasMX) {
+        "pada domain $($net.Domain) yang tidak memiliki catatan MX aktif (tidak dapat menerima email)"
+    }
+    else {
+        "yang dilayani oleh $($net.Provider) ($($net.Domain))"
+    }
+
+    $riskLevel = if ($isCompromised -and ($isBreached -or $isIntelxHit)) {
+        'kritis'
+    }
+    elseif ($isCompromised -or ($isBreached -and $result.Count -ge 3 -and $isIntelxHit) -or ($isRoleBased -and $hasThreatHit)) {
+        'tinggi'
+    }
+    elseif ($hasThreatHit -or $isDisposable -or (-not $net.HasMX)) {
+        'sedang'
+    }
+    else {
+        'rendah'
+    }
+
+    $conclusionStyle = if ($riskLevel -in @('kritis', 'tinggi', 'sedang')) {
+        if ($Pen) { $Pen } else { @{} }
+    }
+    else {
+        if ($Cha) { $Cha } else { @{} }
+    }
+
+    if (-not $hasThreatHit -and -not $isDisposable -and $net.HasMX) {
+        $dnsCaveat = if ($weakDnsAuth) {
+            ", namun karena konfigurasi autentikasi domain (SPF: $($net.SPF), DMARC: $($net.DMARC)) belum optimal terhadap pemalsuan pengirim, disarankan tetap memverifikasi keaslian header pesan apabila alamat ini menjadi pengirim komunikasi sensitif."
+        }
+        else {
+            " serta didukung konfigurasi autentikasi domain yang memadai (SPF: $($net.SPF), DMARC: $($net.DMARC)), sehingga akun ini terpantau aman dan tidak memerlukan tindakan pembatasan akses maupun pemblokiran."
+        }
+
+        $unavailableSources = @()
+        if ($intelxResult.Status -in @('Skipped', 'Error')) { $unavailableSources += 'Intelligence X' }
+        if ($cavalierResult.Status -eq 'Error') { $unavailableSources += 'Hudson Rock Cavalier' }
+        if ($result.Status -eq 'Error') { $unavailableSources += 'XposedOrNot' }
+
+        $coverageNote = if ($unavailableSources.Count -gt 0) {
+            " (catatan: pemeriksaan pada $($unavailableSources -join ', ') tidak tersedia/dilewati)"
+        }
+        else {
+            ""
+        }
+
+        $conclusionParagraph = "Alamat email $cleanEmail ($($contact.AccountRole) - $($contact.ProviderType)) ${infraDesc} ${osintText}terpantau bersih dengan 0 temuan eksposur pada sumber intelijen ancaman yang diperiksa${coverageNote}${dnsCaveat}"
+    }
+    else {
+        $findingClauses = [System.Collections.Generic.List[string]]::new()
+
+        if ($isCompromised) {
+            $stealerList = @($cavalierResult.Findings | ForEach-Object {
+                if ($_.stealer_family) { $_.stealer_family } else { 'infostealer tidak spesifik' }
+            } | Select-Object -Unique) -join ', '
+            $findingClauses.Add("terdeteksi dalam $($cavalierResult.Count) log infeksi malware infostealer ($stealerList) pada Hudson Rock Cavalier")
+        }
+
+        if ($isBreached) {
+            $sampleBreaches = (@($result.Findings | Select-Object -First 4) -join ', ')
+            $findingClauses.Add("terpapar pada $($result.Count) kebocoran data pihak ketiga di XposedOrNot ($sampleBreaches)")
+        }
+
+        if ($isIntelxHit) {
+            $findingClauses.Add("ditemukan dalam $($intelxResult.Count) arsip kebocoran publik di Intelligence X")
+        }
+
+        if ($isDisposable) {
+            $findingClauses.Add("menggunakan layanan email sekali pakai (disposable/burner)")
+        }
+
+        if (-not $net.HasMX) {
+            $findingClauses.Add("domain tujuan tidak memiliki MX record aktif")
+        }
+
+        $findingsText = if ($findingClauses.Count -eq 1) {
+            $findingClauses[0]
+        }
+        elseif ($findingClauses.Count -eq 2) {
+            "$($findingClauses[0]) serta $($findingClauses[1])"
+        }
+        else {
+            $leading = ($findingClauses[0..($findingClauses.Count - 2)] -join ', ')
+            "$leading, serta $($findingClauses[-1])"
+        }
+
+        $mitigationText = if ($isCompromised) {
+            "sehingga karena kredensial dan token sesi berisiko tinggi telah dicuri langsung dari perangkat terinfeksi, mitigasi prioritas yang disarankan adalah segera melakukan reset kata sandi menyeluruh, mencabut seluruh sesi aktif (revoke session/cookies), mengaktifkan MFA, serta melakukan pemindaian malware pada perangkat terkait."
+        }
+        elseif ($isDisposable -or (-not $net.HasMX)) {
+            "sehingga karena memiliki karakteristik akun sementara atau domain tidak valid untuk korespondensi sah, mitigasi yang disarankan adalah menolak atau mengkarantina pendaftaran/transaksi dari alamat ini pada gerbang aplikasi maupun filter keamanan email."
+        }
+        elseif ($isRoleBased -and $hasThreatHit) {
+            "sehingga karena akun berbasis peran (role-based) memiliki paparan kebocoran data yang berisiko dimanfaatkan untuk Business Email Compromise (BEC) atau spear-phishing, mitigasi yang disarankan adalah memaksa rotasi kredensial, memperketat kontrol akses berbasis MFA, serta mengaudit log autentikasi dan aturan forwarding kotak masuk."
+        }
+        else {
+            "sehingga karena kredensial terkait telah terpapar dalam kebocoran data publik, mitigasi yang disarankan adalah memastikan penggunaan kata sandi unik (mencegah credential stuffing), mengaktifkan autentikasi dua faktor (2FA), serta meningkatkan pemantauan terhadap aktivitas login mencurigakan maupun upaya phishing."
+        }
+
+        $conclusionParagraph = "Alamat email $cleanEmail ($($contact.AccountRole) - $($contact.ProviderType)) ${infraDesc} ${osintText}berada pada tingkat risiko $riskLevel karena $findingsText, $mitigationText"
+    }
+
+    Write-Host "`n[*] Conclusion: $conclusionParagraph" @conclusionStyle
 }
