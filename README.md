@@ -62,5 +62,3 @@ To remain self-contained without requiring external runtime installations, Garud
 - **[AWS Labs LLRT (Low Latency Runtime)](https://github.com/awslabs/llrt)** — Licensed under the **Apache License 2.0** (used for lightweight Layer 7 service probing).
 - **[Jint](https://github.com/sebastienros/jint)** — Licensed under the **BSD-2-Clause License**.
 - **[Acornima](https://github.com/adams85/acornima)** — Licensed under the **MIT License**.
-
-Full copies of third-party license texts are included in `src/Runtime/THIRD-PARTY-LICENSES.txt`.
