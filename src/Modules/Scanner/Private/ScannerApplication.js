@@ -1,73 +1,150 @@
-function withTimeout(promise, ms) {
-    let timerId;
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+const fs = require("node:fs/promises");
+const net = require("node:net");
+
+const TIMEOUT_MS = 2000;
+const MAX_CONCURRENCY = 50;
+
+async function probeHttp(item) {
+    const port = Number(item.Port);
+    const protocol = [443, 8443].includes(port) ? "https" : "http";
+    const url = `${protocol}://${item.Host}:${port}/`;
+
+    const controller = new AbortController();
+    let timer = null;
+
     const timeoutPromise = new Promise((_, reject) => {
-        timerId = setTimeout(() => reject(new Error("Timeout")), ms);
+        timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error("Timeout"));
+        }, TIMEOUT_MS);
     });
 
-    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timerId));
+    try {
+        const fetchPromise = fetch(url, {
+            method: "HEAD",
+            headers: { "User-Agent": "Garuda/1.0" },
+            redirect: "manual",
+            signal: controller.signal
+        });
+        // Cegah unhandled rejection jika timeoutPromise selesai lebih dulu
+        fetchPromise.catch(() => {});
+
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
+
+        const statusText = response.statusText ? ` ${response.statusText}` : "";
+        const serverHeader = response.headers ? response.headers.get("server") : null;
+        const serverInfo = serverHeader ? ` (${serverHeader.trim()})` : "";
+
+        return `HTTP/1.1 ${response.status}${statusText}${serverInfo}`;
+    } catch (_) {
+        return "No Banner / Timeout";
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+function probeTcpBanner(item) {
+    return new Promise((resolve) => {
+        const host = item.Host;
+        const port = Number(item.Port);
+        let socket = null;
+        let timer = null;
+        let settled = false;
+
+        const finish = (banner) => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            if (socket && !socket.destroyed) {
+                try { socket.destroy(); } catch (_) {}
+            }
+            resolve(banner);
+        };
+
+        timer = setTimeout(() => {
+            finish("No Banner / Timeout");
+        }, TIMEOUT_MS);
+
+        try {
+            socket = net.connect({ host: host, port: port }, () => {
+                if (settled) return;
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    finish("No Banner / Timeout");
+                }, TIMEOUT_MS);
+            });
+
+            socket.on("data", (chunk) => {
+                const rawText = Buffer.from(chunk).toString("utf8");
+                const firstLine = rawText.split(/\r?\n/)[0].trim();
+                finish(firstLine || "No Banner / Timeout");
+            });
+
+            socket.on("error", (err) => {
+                const msg = err && err.message ? err.message : String(err);
+                finish(msg.includes("Timeout") ? "No Banner / Timeout" : `Error: ${msg}`);
+            });
+
+            socket.on("end", () => finish("No Banner / Timeout"));
+            socket.on("close", () => finish("No Banner / Timeout"));
+        } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            finish(`Error: ${msg}`);
+        }
+    });
 }
 
 async function probeL7(item) {
-    let banner = "No Banner / Timeout";
-    let conn;
+    const port = Number(item.Port);
+    const isHttp = [80, 8080, 443, 8443].includes(port);
+    const banner = isHttp ? await probeHttp(item) : await probeTcpBanner(item);
 
-    try {
-        const isSsl = [443, 8443].includes(item.Port);
-
-        const connectPromise = isSsl
-            ? Deno.connectTls({ hostname: item.Host, port: item.Port, alpnProtocols: ["http/1.1"] })
-            : Deno.connect({ hostname: item.Host, port: item.Port });
-
-        conn = await withTimeout(connectPromise, 2000);
-
-        if ([80, 8080, 443, 8443].includes(item.Port)) {
-            const payload = new TextEncoder().encode(
-                `HEAD / HTTP/1.1\r\nHost: ${item.Host}\r\nUser-Agent: Garuda/1.0\r\nConnection: close\r\n\r\n`
-            );
-            await conn.write(payload);
-        } else {
-            await new Promise(r => setTimeout(r, 200)); 
-        }
-
-        const buffer = new Uint8Array(2048);
-        const bytesRead = await withTimeout(conn.read(buffer), 2000);
-
-        if (bytesRead) {
-            const rawText = new TextDecoder().decode(buffer.subarray(0, bytesRead));
-            banner = rawText.split(/\r?\n/)[0].trim();
-        }
-
-    } catch (err) {
-        banner = err.message.includes("Timeout") ? "No Banner / Timeout" : `Error: ${err.message}`;
-    } finally {
-        if (conn) {
-            try { conn.close(); } catch (_) {}
-        }
-    }
-
-    return { 
-        Host: item.Host, 
-        Port: item.Port, 
-        L4_Service: item.L4_Service, 
-        L7_Banner: banner 
+    return {
+        Host: item.Host,
+        Port: item.Port,
+        L4_Service: item.L4_Service,
+        L7_Banner: banner
     };
 }
 
+async function runWithConcurrency(items, limit, workerFn) {
+    const results = new Array(items.length);
+    let index = 0;
+
+    async function worker() {
+        while (index < items.length) {
+            const currentIndex = index++;
+            results[currentIndex] = await workerFn(items[currentIndex]);
+        }
+    }
+
+    const workers = Array.from(
+        { length: Math.min(limit, items.length) },
+        () => worker()
+    );
+    await Promise.all(workers);
+    return results;
+}
+
 async function main() {
-    if (Deno.args.length === 0) return;
+    const args = process.argv.slice(2);
+    if (args.length === 0) process.exit(0);
 
     try {
-        const inputData = await Deno.readTextFile(Deno.args[0]);
-        if (!inputData.trim()) return;
+        const rawInput = await fs.readFile(args[0], "utf8");
+        const inputData = rawInput.replace(/^\uFEFF/, "");
+        if (!inputData.trim()) process.exit(0);
 
         const openPorts = JSON.parse(inputData);
-        
-        const results = await Promise.all(openPorts.map(item => probeL7(item)));
-        
-        const validResults = results.filter(r => r.L7_Banner !== "No Banner / Timeout");
-        
+        const results = await runWithConcurrency(openPorts, MAX_CONCURRENCY, probeL7);
+        const validResults = results.filter((r) => r.L7_Banner !== "No Banner / Timeout");
+
         console.log(JSON.stringify(validResults));
-    } catch (e) {
+    } catch (_) {
+    } finally {
+        process.exit(0);
     }
 }
 
