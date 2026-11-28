@@ -54,3 +54,13 @@ Note (Windows): If script execution is blocked by the default Windows Execution 
 ```bash
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 ```
+
+## License & Third-Party Notices
+Garuda is licensed under the **GNU General Public License v3.0 (GPL-3.0)** — see the [LICENSE](LICENSE) file for details.
+
+To remain self-contained without requiring external runtime installations, Garuda bundles pre-compiled third-party components in `src/Runtime` under their respective open-source licenses:
+- **[AWS Labs LLRT (Low Latency Runtime)](https://github.com/awslabs/llrt)** — Licensed under the **Apache License 2.0** (used for lightweight Layer 7 service probing).
+- **[Jint](https://github.com/sebastienros/jint)** — Licensed under the **BSD-2-Clause License**.
+- **[Acornima](https://github.com/adams85/acornima)** — Licensed under the **MIT License**.
+
+Full copies of third-party license texts are included in `src/Runtime/THIRD-PARTY-LICENSES.txt`.

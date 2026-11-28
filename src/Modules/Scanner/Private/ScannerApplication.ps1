@@ -4,26 +4,50 @@ function scannerApplication {
         [array]$OpenPorts
     )
 
-    $denoCmd =$null
-    if (Get-Command deno -ErrorAction SilentlyContinue) {
-        $denoCmd = "deno"
-    } elseif (Test-Path "$HOME/.deno/bin/deno") {
-        $denoCmd = "$HOME/.deno/bin/deno"
+    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    $isWin = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
+    $llrtBinaryName = if ($isWin -and $arch -eq 'X64') {
+        'llrt-windows-x64-no-sdk.exe'
+    } elseif ($IsLinux -and $arch -eq 'X64') {
+        'llrt-linux-x64-no-sdk'
+    } elseif ($IsMacOS -and $arch -eq 'Arm64') {
+        'llrt-darwin-arm64-no-sdk'
+    } else {
+        $null
     }
 
-    if ($null -ne$denoCmd) {
-        Write-Host "`n[+] Deno engine detected. Using Deno for Layer 7 optimization..." @Net
+    $llrtCmd = $null
+    if ($null -ne $llrtBinaryName) {
+        $searchDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+        for ($i = 0; $i -lt 5 -and -not [string]::IsNullOrEmpty($searchDir); $i++) {
+            $candidate = [System.IO.Path]::Combine($searchDir, 'Runtime', $llrtBinaryName)
+            if (Test-Path -Path $candidate -PathType Leaf) {
+                $llrtCmd = $candidate
+                break
+            }
+            $parentObj = [System.IO.Directory]::GetParent($searchDir)
+            $searchDir = if ($null -ne $parentObj) { $parentObj.FullName } else { $null }
+        }
+    }
+
+    if ($null -ne $llrtCmd) {
+        if (-not $isWin -and (Get-Command chmod -ErrorAction SilentlyContinue)) {
+            & chmod +x $llrtCmd 2>$null
+        }
+
+        Write-Host "`n[+] LLRT engine detected. Using LLRT for Layer 7 optimization..." @Net
         
         $scriptPath = [System.IO.Path]::Combine($PSScriptRoot, 'ScannerApplication.js')
         $tempFile = [System.IO.Path]::GetTempFileName()
         
         try {
-            ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress | Out-File -FilePath $tempFile -Encoding utf8
+            $jsonPayload = ConvertTo-Json -InputObject @($OpenPorts) -Depth 10 -Compress
+            [System.IO.File]::WriteAllText($tempFile, $jsonPayload, [System.Text.UTF8Encoding]::new($false))
             
-            $denoOutput = (& $denoCmd run --quiet --allow-net --allow-read $scriptPath $tempFile) -join ""
+            $llrtOutput = (& $llrtCmd $scriptPath $tempFile) -join ""
             
-            if (-not [string]::IsNullOrWhiteSpace($denoOutput)) {
-                $l7Output = @($denoOutput | ConvertFrom-Json)
+            if (-not [string]::IsNullOrWhiteSpace($llrtOutput)) {
+                $l7Output = @($llrtOutput | ConvertFrom-Json)
                 
                 if ($null -ne $l7Output -and $l7Output.Count -gt 0) {
                     $l7Output | ForEach-Object {
@@ -34,18 +58,18 @@ function scannerApplication {
                         $dto
                     } | Sort-Object IPAddress, Port | Select-Object IPAddress, Port, Service, L7Banner | Format-Table -AutoSize
                 } else {
-                    Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
+                    Write-Host "`nNo service returns a banner at Layer 7 (LLRT Engine)." @Cha
                 }
             } else {
-                Write-Host "`nNo service returns a banner at Layer 7 (Deno Engine)." @Cha
+                Write-Host "`nNo service returns a banner at Layer 7 (LLRT Engine)." @Cha
             }
         } catch {
-            Write-Host "`n[!] Deno execution failed. Error: $($_.Exception.Message)" @Pen
+            Write-Host "`n[!] LLRT execution failed. Error: $($_.Exception.Message)" @Pen
         } finally {
             if (Test-Path $tempFile) { Remove-Item -Path $tempFile -Force }
         }
     } else {
-        Write-Host "`n[!] Deno engine not found. Install Deno for Layer 7 optimization." @Cha
+        Write-Host "`n[!] LLRT binary not found for current OS/Architecture ($arch)." @Cha
         Write-Host "Starting native PowerShell Layer 7 scanning on $($OpenPorts.Count) open port..." @Net
 
         $l7Result = [System.Collections.Concurrent.ConcurrentDictionary[object, object]]::new()
