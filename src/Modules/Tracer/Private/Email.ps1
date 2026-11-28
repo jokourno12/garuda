@@ -913,4 +913,65 @@ function email {
     }
 
     Write-Host "`n[*] Conclusion: $conclusionParagraph" @conclusionStyle
+
+    # ==========================================================
+    # Rekomendasi Mitigasi & Kelayakan Aset (Hanya Jika Ada Temuan)
+    # ==========================================================
+    $recommendations = [System.Collections.Generic.List[string]]::new()
+
+    # [1] Contact Info
+    if ($contact.ProviderType -like 'Public Webmail*' -or $contact.ProviderType -eq 'Disposable / Burner Email') {
+        $recommendations.Add('- Migrasikan akun aset ke domain resmi organisasi agar berada di bawah kendali keamanan terpusat.')
+    }
+    if ($contact.Gravatar.Found) {
+        $recommendations.Add('- Nonaktifkan atau batasi profil publik Gravatar pada email aset untuk memperkecil jejak OSINT.')
+    }
+    if ($contact.PGP.Found) {
+        $recommendations.Add('- Audit masa berlaku dan status pencabutan (revocation) kunci publik PGP secara berkala.')
+    }
+
+    # [2] Network Connection
+    if (-not $net.HasMX) {
+        $recommendations.Add('- Perbaiki konfigurasi DNS MX atau ganti domain aset jika alamat ini masih dibutuhkan untuk komunikasi masuk.')
+    }
+    elseif ($contact.ProviderType -eq 'Custom / Organizational Domain') {
+        if ($net.Provider -eq 'Custom / Self-Hosted Mail Server') {
+            $recommendations.Add('- Pastikan server email dikelola dengan kontrol anti-spam, enkripsi TLS, dan pemantauan keamanan yang memadai.')
+        }
+        if (-not $net.ReverseDNS) {
+            $recommendations.Add('- Selaraskan konfigurasi PTR (Reverse DNS) pada server pengirim untuk mencegah penolakan email (bounce) oleh penerima eksternal.')
+        }
+        if ($net.SPF -notmatch '-all|redirect') {
+            $recommendations.Add('- Perketat kebijakan SPF domain menjadi hardfail (-all) untuk mencegah pengiriman email tidak sah atas nama domain aset.')
+        }
+        if ($net.DMARC -notin @('p=quarantine', 'p=reject')) {
+            $recommendations.Add('- Terapkan kebijakan DMARC minimal p=quarantine atau p=reject guna melindungi domain aset dari penyalahgunaan spoofing.')
+        }
+        if ($net.MTASTS -ne 'Enabled') {
+            $recommendations.Add('- Pertimbangkan penerapan MTA-STS untuk memaksa enkripsi TLS pada jalur pengiriman email masuk (opsional sesuai kebijakan keamanan).')
+        }
+    }
+
+    # [3] Hacker Activity (Intelligence X)
+    if ($intelxResult.Status -eq 'Exposed' -and $intelxResult.Count -gt 0) {
+        $recommendations.Add('- Audit eksposur data terkait, perketat filter spear-phishing, atau pertimbangkan penggantian alamat email aset jika tergolong sensitif.')
+    }
+
+    # [4] Malicious Activity (Hudson Rock Cavalier)
+    if ($cavalierResult.Status -eq 'Compromised' -and $cavalierResult.Count -gt 0) {
+        $recommendations.Add('- Lakukan reset kata sandi, cabut seluruh sesi aktif (revoke tokens), dan bersihkan perangkat endpoint terkait secara menyeluruh.')
+    }
+
+    # [5] Platforms (XposedOrNot)
+    if ($result.Status -eq 'Exposed' -and $result.Count -gt 0) {
+        $recommendations.Add('- Aktifkan MFA untuk mencegah credential stuffing dan lepas akun dari layanan pihak ketiga yang tidak relevan.')
+    }
+
+    if ($recommendations.Count -gt 0) {
+        $recStyle = if ($Pen) { $Pen } else { @{} }
+        Write-Host "`n[*] Recommendation:" @recStyle
+        foreach ($rec in $recommendations) {
+            Write-Host $rec @recStyle
+        }
+    }
 }
